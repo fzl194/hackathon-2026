@@ -1,0 +1,13 @@
+* text=auto eol=lf
+# Markdown hard line breaks and archived source spacing are intentional.
+*.md text eol=lf whitespace=-blank-at-eol,-blank-at-eof
+*.json text eol=lf
+*.jsonl text eol=lf
+*.html text eol=lf whitespace=-blank-at-eol,-blank-at-eof
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.xlsx binary
+*.zip binary

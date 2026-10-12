@@ -1,0 +1,601 @@
+<p style="margin-bottom: 12.0pt; text-align: center; line-height: 1.6;"><b><span style="font-size: 20.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">AI Core</span></b><b><span style="font-size: 20.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">多流优化</span></b><span style="line-height: 1.6;"></span></p>
+<p style="page-break-after: avoid; line-height: 1.6; margin: 14.0pt 0cm 6.0pt 0cm;"><b><span style="font-size: 15.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">一、背景信息</span></b><span style="line-height: 1.6;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">一个基于昇腾处理器的异构系统通常包含</span><span style="line-height: normal;">CPU</span><span style="font-family: 宋体;">与昇腾</span><span style="line-height: normal;">NPU</span><span style="font-family: 宋体;">。其中，</span><span style="line-height: normal;">CPU</span><span style="font-family: 宋体;">及其内存称为</span><span style="line-height: normal;">Host</span><span style="font-family: 宋体;">与</span><span style="line-height: normal;">Host Memory</span><span style="font-family: 宋体;">；</span><span style="line-height: normal;">NPU</span><span style="font-family: 宋体;">及其内存称为</span><span style="line-height: normal;">Device</span><span style="font-family: 宋体;">与</span><span style="line-height: normal;">Device Memory</span><span style="font-family: 宋体;">。基于昇腾的应用程序通常包含两部分：一部分运行在</span><span style="line-height: normal;">Host CPU</span><span style="font-family: 宋体;">上，另一部分运行在</span><span style="line-height: normal;">NPU</span><span style="font-family: 宋体;">上。运行在</span><span style="line-height: normal;">NPU</span><span style="font-family: 宋体;">上的代码称为核函数（</span><span style="line-height: normal;">Kernel</span><span style="font-family: 宋体;">），需由</span><span style="line-height: normal;">Host</span><span style="font-family: 宋体;">代码调用执行。本题目重点关注</span><span style="line-height: normal;">NPU</span><span style="font-family: 宋体;">侧如何高效执行</span><span style="line-height: normal;">Kernel</span><span style="font-family: 宋体;">的问题。</span><span style="line-height: normal;"></span></p>
+<p style="text-align: center; line-height: normal;"><br></p>
+<div>
+<div class="csw-upload-pic-fail">
+<div class="csw-upload-pic-fail-area">
+<div class="csw-upload-pic-area"><span class="csw-upload-pic"><img src="https://www.chaspark.com/chasiwu/media/v1/tinyimage/1326715464715304960.png?state=2&auth_key=1791447335-jfkzjml93lvm8qj8fjohuuxasdf0wfku-0-777614edde09abf8b4c723d1b6c31464092e25de1435a12290cc0ba5ab121295&translate_time=1791447339"></span></div>
+<div class="csw-upload-pic-fail-tips"><br></div>
+</div>
+</div>
+</div>
+<p style="font-family: sans-serif !important; color: rgb(0, 0, 0) !important; font-size: 16px !important;"><br></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">AI Core</span><span style="font-family: 宋体;">（</span><span style="line-height: normal;">AI</span><span style="font-family: 宋体;">处理器的计算核心）是</span><span style="line-height: normal;">NPU</span><span style="font-family: 宋体;">的计算核心。为提升计算效率，</span><span style="line-height: normal;">NPU</span><span style="font-family: 宋体;">上通常有多个计算核（</span><span style="line-height: normal;">AI Core</span><span style="font-family: 宋体;">）并发执行，每个核一般处理不同的数据。传统上，</span><span style="line-height: normal;">AI Core</span><span style="font-family: 宋体;">遵循</span><span style="line-height: normal;">SIMD</span><span style="font-family: 宋体;">（</span><span style="line-height: normal;">Single Instruction Multiple Data</span><span style="font-family: 宋体;">，单指令多数据流）模型，通过一条指令同时操作多个数据实现并行计算。</span><span style="line-height: normal;">AI Core</span><span style="font-family: 宋体;">同时包含</span><span style="line-height: normal;"> AIC</span><span style="font-family: 宋体;">（计算密集型）和</span><span style="line-height: normal;"> AIV</span><span style="font-family: 宋体;">（向量型）两类计算核心，并提供多条执行流。<b>为简化题目复杂度，我们做了一层抽象假设，在</b></span><b><span style="line-height: normal;">NPU</span></b><b><span style="font-family: 宋体;">内打破</span><span style="line-height: normal;">AI Core</span></b><b><span style="font-family: 宋体;">边界整体来看</span><span style="line-height: normal;">AIC</span></b><b><span style="font-family: 宋体;">和</span><span style="line-height: normal;">AIV</span></b><b><span style="font-family: 宋体;">的调度问题。</span></b><span style="line-height: normal;"></span></p>
+<p style="text-align: center; line-height: normal;"><br></p>
+<div>
+<div class="csw-upload-pic-fail">
+<div class="csw-upload-pic-fail-area">
+<div class="csw-upload-pic-area"><span class="csw-upload-pic"><img src="https://www.chaspark.com/chasiwu/media/v1/tinyimage/1326715517730639872.png?state=2&auth_key=1791447348-lfxvcw74y5ha9xcsml09nm2girgqefqi-0-f319b4323fc991eaa4562dd78a2bfd212dcc50046652c333eb4a0aeeaaf4d17c&translate_time=1791447358"></span></div>
+<div class="csw-upload-pic-fail-tips"><br></div>
+</div>
+</div>
+</div>
+<p style="font-family: sans-serif !important; color: rgb(0, 0, 0) !important; font-size: 16px !important;"><br></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">即，目标</span><span style="line-height: normal;"> NPU </span><span style="font-family: 宋体;">包含两大类计算核心：</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.1pt; line-height: normal; overflow-x: auto;"><b><span style="line-height: normal;">- **AIC</span></b><b><span style="font-family: 宋体;">（</span><span style="line-height: normal;">AI Cube Core</span></b><b><span style="font-family: 宋体;">）</span><span style="line-height: normal;">**</span></b><b><span style="font-family: 宋体;">：主要执行卷积、矩阵乘等计算密集型算子；</span><span style="line-height: normal;"></span></b></p>
+<p style="text-indent: 21.1pt; line-height: normal; overflow-x: auto;"><b><span style="line-height: normal;">- **AIV</span></b><b><span style="font-family: 宋体;">（</span><span style="line-height: normal;">AI Vector Core</span></b><b><span style="font-family: 宋体;">）</span><span style="line-height: normal;">**</span></b><b><span style="font-family: 宋体;">：主要执行归一化、激活、数据处理和后处理等向量型算子。</span><span style="line-height: normal;"></span></b></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">NPU </span><span style="font-family: 宋体;">同时提供多条执行流（</span><span style="line-height: normal;">Stream</span><span style="font-family: 宋体;">）。同一</span><span style="line-height: normal;"> Stream </span><span style="font-family: 宋体;">内的命令串行执行，不同</span><span style="line-height: normal;"> Stream </span><span style="font-family: 宋体;">上的算子可以重叠运行。跨</span><span style="line-height: normal;"> Stream </span><span style="font-family: 宋体;">的数据依赖需要通过</span><span style="line-height: normal;"> Event Record </span><span style="font-family: 宋体;">和</span><span style="line-height: normal;"> Event Wait </span><span style="font-family: 宋体;">同步。即使依赖关系允许并行，算子仍会共同竞争核心数量、显存，因此简单地增加</span><span style="line-height: normal;"> Stream </span><span style="font-family: 宋体;">不一定能缩短执行时间。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">对于深度模型来讲，在跑到</span><span style="line-height: normal;">NPU</span><span style="font-family: 宋体;">前会做很多高层编译优化和硬件相关优化。深度模型经过编译后，最终可以表示为计算图：节点是算子，有向边表示数据依赖。没有依赖关系的算子可能并行执行，汇合算子则必须等待所有输入完成。接下来我们就可以把经过编译后的计算图下发到</span><span style="line-height: normal;">NPU</span><span style="font-family: 宋体;">上去执行。而如何能在</span><span style="line-height: normal;">NPU</span><span style="font-family: 宋体;">上高效地执行计算图成为一个需要综合考量和在具体硬件上寻优的问题，我们需要把计算图的节点通过更合理的方式下发到</span><span style="line-height: normal;">AIC</span><span style="font-family: 宋体;">和</span><span style="line-height: normal;">AIV</span><span style="font-family: 宋体;">上去计算，实现计算图运行的最优性能。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">在本题中，你扮演</span><span style="line-height: normal;"> AI </span><span style="font-family: 宋体;">编译器或运行时调度器的开发者。给定硬件资源、一张算子</span><span style="line-height: normal;"> DAG </span><span style="font-family: 宋体;">和业务截止时间，你需要生成一份合法且高效的多流调度方案。你需要为每个算子指定</span><span style="line-height: normal;"> Stream</span><span style="font-family: 宋体;">、流内顺序和必要的跨流</span><span style="line-height: normal;"> Event</span><span style="font-family: 宋体;">。判题器会按本文规定的确定性规则推导实际开始时间、完成时间和资源占用；你不能直接指定算子的开始时间。本题不要求使用真实</span><span style="line-height: normal;"> NPU</span><span style="font-family: 宋体;">，所有调度均由判题器模拟执行。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">&nbsp;</span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">目标依次为：</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">1. </span><span style="font-family: 宋体;">返回合法方案，并在</span><span style="line-height: normal;"> `deadline_us` </span><span style="font-family: 宋体;">内完成全部算子；</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">2. </span><span style="font-family: 宋体;">尽量缩短全图完成时间，记为</span><span style="line-height: normal;"> T</span><span style="font-family: 宋体;">。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">`event_record_time` </span><span style="font-family: 宋体;">与</span><span style="line-height: normal;"> `event_wait_time` </span><span style="font-family: 宋体;">是跨流</span><span style="line-height: normal;"> Record / Wait </span><span style="font-family: 宋体;">的硬件耗时，已经进入模拟时间线，从而计入</span><span style="line-height: normal;"> T</span><span style="font-family: 宋体;">，不作为单独评分项。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">所有时间单位为微秒（μ</span><span style="line-height: normal;">s</span><span style="font-family: 宋体;">），显存单位为</span><span style="line-height: normal;"> MiB</span><span style="font-family: 宋体;">。</span><span style="line-height: normal;"></span></p>
+<p style="page-break-after: avoid; line-height: 1.6; margin: 14.0pt 0cm 6.0pt 0cm;"><b><span style="font-size: 15.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">二、问题描述</span></b><span style="line-height: 1.6;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">给定硬件资源、一张算子</span><span style="line-height: normal;"> DAG </span><span style="font-family: 宋体;">和业务截止时间，请为每个算子指定</span><span style="line-height: normal;"> Stream</span><span style="font-family: 宋体;">、流内顺序和必要的跨流</span><span style="line-height: normal;"> Event</span><span style="font-family: 宋体;">。判题器按本文规定的确定性规则推导开始时间与完成时间，选手不能直接指定开始时间。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">• </span><span style="font-family: 宋体;">返回合法方案，并在</span><span style="line-height: normal;"> deadline_us </span><span style="font-family: 宋体;">内完成全部算子。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">• </span><span style="font-family: 宋体;">在合法方案中，优先最小化全图完成时间</span><span style="line-height: normal;"> T</span><span style="font-family: 宋体;">；</span><span style="line-height: normal;">T </span><span style="font-family: 宋体;">相同时比较峰值显存。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">• </span><span style="font-family: 宋体;">所有时间单位为微秒（</span><span style="line-height: normal;">us</span><span style="font-family: 宋体;">），显存单位为</span><span style="line-height: normal;"> MiB</span><span style="font-family: 宋体;">；</span><span style="line-height: normal;">Record </span><span style="font-family: 宋体;">与</span><span style="line-height: normal;"> Wait </span><span style="font-family: 宋体;">的耗时进入</span><span style="line-height: normal;"> T</span><span style="font-family: 宋体;">。</span><span style="line-height: normal;"></span></p>
+<p style="page-break-after: avoid; line-height: 1.6; margin: 8.0pt 0cm 6.0pt 0cm;"><b><span style="font-size: 12.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">2.1 </span></b><b><span style="font-size: 12.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">参赛接口</span></b><span style="line-height: 1.6;"></span></p>
+<table class="data-preserve-origin-style" border="1" cellspacing="0" cellpadding="0" style="border-collapse: collapse; border: 1px solid transparent; width: 100%;"><colgroup><col style="width: 100.0000%;"></colgroup>
+<tbody>
+<tr>
+<td valign="top" style="background: #F2F2F2; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="line-height: normal;"><span style="font-size: 8.5pt; font-family: Consolas; color: black;">#include &lt;cstdint&gt;<br>#include &lt;vector&gt;<br><br>enum class CoreType : int { AIC = 0, AIV = 1 };<br><br>struct HardwareInfo {<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>int aic_core_num;<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>int aiv_core_num;<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>int stream_num;<span style="line-height: normal;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span>// </span><span style="font-size: 8.5pt; font-family: Consolas; color: black;">最多可使用的<span style="line-height: normal;"> Stream </span>数量<span style="line-height: normal;"><br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>std::int64_t memory_limit;<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>std::int64_t event_record_time;<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>std::int64_t event_wait_time;<br>};<br><br>struct OperatorNode {<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>int id;<span style="line-height: normal;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span>// </span>全局唯一，不保证连续<span style="line-height: normal;"><br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>CoreType core_type;<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>int core_num;<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>std::int64_t exec_time;<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>std::int64_t workspace_memory;<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>std::int64_t output_memory;<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>std::vector&lt;int&gt; inputs;<span style="line-height: normal;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span>// </span>直接前驱算子<span style="line-height: normal;"> ID<br>};<br><br>struct StreamTask {<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>int op_id;<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>std::vector&lt;int&gt; wait_before; // Compute </span>前等待；可无序，但不得重复<span style="line-height: normal;"><br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>int record_after;<span style="line-height: normal;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span>// Compute </span>后<span style="line-height: normal;"> Record</span>；<span style="line-height: normal;">-1 </span>表示不记录<span style="line-height: normal;"><br>};<br><br>struct StreamPlan {<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>std::vector&lt;StreamTask&gt; tasks; // </span>数组顺序就是流内执行顺序<span style="line-height: normal;"><br>};<br><br>struct SchedulePlan {<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>std::vector&lt;StreamPlan&gt; streams; // streams[i] </span>对应<span style="line-height: normal;"> Stream i<br>};<br><br>SchedulePlan ScheduleCvGraph(<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>const HardwareInfo &amp;hardware,<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>const std::vector&lt;OperatorNode&gt; &amp;operators,<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>std::int64_t deadline_us);</span></span><span style="line-height: normal;"></span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">streams[i] </span><span style="font-family: 宋体;">表示</span><span style="line-height: normal;"> Stream i</span><span style="font-family: 宋体;">，</span><span style="line-height: normal;">tasks </span><span style="font-family: 宋体;">数组顺序就是流内顺序。每个算子必须出现且仅出现一次；</span><span style="line-height: normal;">Stream </span><span style="font-family: 宋体;">数不得超过</span><span style="line-height: normal;"> hardware.stream_num</span><span style="font-family: 宋体;">。空</span><span style="line-height: normal;"> Stream </span><span style="font-family: 宋体;">会被删除并压缩流号，不单独判非法。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">wait_before </span><span style="font-family: 宋体;">是</span><span style="line-height: normal;"> Compute </span><span style="font-family: 宋体;">前要等待的</span><span style="line-height: normal;"> Event </span><span style="font-family: 宋体;">列表，顺序不限；判题器会按</span><span style="line-height: normal;"> Event ID </span><span style="font-family: 宋体;">排序，重复</span><span style="line-height: normal;"> ID </span><span style="font-family: 宋体;">仍非法。</span><span style="line-height: normal;">record_after </span><span style="font-family: 宋体;">为非负时，</span><span style="line-height: normal;">Compute </span><span style="font-family: 宋体;">完成后立即</span><span style="line-height: normal;"> Record </span><span style="font-family: 宋体;">该</span><span style="line-height: normal;"> Event</span><span style="font-family: 宋体;">；</span><span style="line-height: normal;">-1 </span><span style="font-family: 宋体;">表示不记录。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">若消费者和直接前驱位于同一</span><span style="line-height: normal;"> Stream</span><span style="font-family: 宋体;">，前驱必须排在消费者之前，不需要</span><span style="line-height: normal;"> Event</span><span style="font-family: 宋体;">。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">编译与评测以</span><span style="line-height: normal;"> include/problem.h </span><span style="font-family: 宋体;">为准。</span><span style="line-height: normal;"></span></p>
+<p style="page-break-after: avoid; line-height: 1.6; margin: 14.0pt 0cm 6.0pt 0cm;"><b><span style="font-size: 15.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">三、赛题要求</span></b><span style="line-height: 1.6;"></span></p>
+<p style="page-break-after: avoid; line-height: 1.6; margin: 8.0pt 0cm 6.0pt 0cm;"><b><span style="font-size: 12.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">3.1 </span></b><b><span style="font-size: 12.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">调度合法性</span></b><span style="line-height: 1.6;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">• </span><span style="font-family: 宋体;">每个任务依次执行</span><span style="line-height: normal;"> wait_before</span><span style="font-family: 宋体;">、</span><span style="line-height: normal;">Compute </span><span style="font-family: 宋体;">和</span><span style="line-height: normal;"> record_after</span><span style="font-family: 宋体;">。</span><span style="line-height: normal;">wait_before </span><span style="font-family: 宋体;">中</span><span style="line-height: normal;"> Event ID </span><span style="font-family: 宋体;">必须非负；判题器先升序排列，重复则非法。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">• </span><span style="font-family: 宋体;">每个</span><span style="line-height: normal;"> Event </span><span style="font-family: 宋体;">只能被一个算子</span><span style="line-height: normal;"> Record</span><span style="font-family: 宋体;">；</span><span style="line-height: normal;">Record </span><span style="font-family: 宋体;">的</span><span style="line-height: normal;"> Event ID </span><span style="font-family: 宋体;">由判题器按数值重映射为从</span><span style="line-height: normal;"> 0 </span><span style="font-family: 宋体;">开始连续；每个</span><span style="line-height: normal;"> Record </span><span style="font-family: 宋体;">必须至少被一个任务</span><span style="line-height: normal;"> Wait</span><span style="font-family: 宋体;">。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">• </span><span style="font-family: 宋体;">同一</span><span style="line-height: normal;"> Stream </span><span style="font-family: 宋体;">内的依赖由流内顺序保证，禁止同流</span><span style="line-height: normal;"> Event</span><span style="font-family: 宋体;">。跨</span><span style="line-height: normal;"> Stream </span><span style="font-family: 宋体;">的直接依赖必须同步；也允许额外跨流</span><span style="line-height: normal;"> Event </span><span style="font-family: 宋体;">来调整资源竞争顺序。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">• Wait </span><span style="font-family: 宋体;">在全部</span><span style="line-height: normal;"> wait_before </span><span style="font-family: 宋体;">的</span><span style="line-height: normal;"> Event ready </span><span style="font-family: 宋体;">后开始，耗时为</span><span style="line-height: normal;"> wait_before.size() * event_wait_time</span><span style="font-family: 宋体;">；</span><span style="line-height: normal;">Record </span><span style="font-family: 宋体;">耗时为</span><span style="line-height: normal;"> event_record_time</span><span style="font-family: 宋体;">。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">• </span><span style="font-family: 宋体;">额外跨流</span><span style="line-height: normal;"> Event </span><span style="font-family: 宋体;">只调整执行顺序，不新增数据依赖，也不改变输出显存释放时机。若造成循环等待，方案非法。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">• </span><span style="font-family: 宋体;">判题器从时刻</span><span style="line-height: normal;"> 0 </span><span style="font-family: 宋体;">开始。同一时刻按</span><span style="line-height: normal;"> Stream </span><span style="font-family: 宋体;">编号从小到大尝试启动；资源不足不阻止后续</span><span style="line-height: normal;"> Stream</span><span style="font-family: 宋体;">。零耗时</span><span style="line-height: normal;"> Wait/Record </span><span style="font-family: 宋体;">立即完成。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">• </span><span style="font-family: 宋体;">若仍有算子未完成却没有任何命令可执行，方案非法。同一方案每次得到相同结果。</span><span style="line-height: normal;"></span></p>
+<p style="page-break-after: avoid; line-height: 1.6; margin: 8.0pt 0cm 6.0pt 0cm;"><b><span style="font-size: 12.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">3.2 </span></b><b><span style="font-size: 12.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">资源与显存</span></b><span style="line-height: 1.6;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">• AIC </span><span style="font-family: 宋体;">与</span><span style="line-height: normal;"> AIV </span><span style="font-family: 宋体;">核数分别统计，正在运行的同类算子核数之和不得超过上限。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">• Compute </span><span style="font-family: 宋体;">开始时占用</span><span style="line-height: normal;"> workspace_memory </span><span style="font-family: 宋体;">与</span><span style="line-height: normal;"> output_memory</span><span style="font-family: 宋体;">；结束后释放</span><span style="line-height: normal;"> workspace_memory</span><span style="font-family: 宋体;">。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">• </span><span style="font-family: 宋体;">算子输出保留到最后一个直接后继完成后释放；最终输出保留到全图结束。任意时刻显存不得超过</span><span style="line-height: normal;"> memory_limit</span><span style="font-family: 宋体;">。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">执行区间均为左闭右开</span><span style="line-height: normal;"> [start, end)</span><span style="font-family: 宋体;">。算子</span><span style="line-height: normal;"> i </span><span style="font-family: 宋体;">的结束时刻与全图完成时间：</span><span style="line-height: normal;"></span></p>
+<table class="data-preserve-origin-style" border="1" cellspacing="0" cellpadding="0" style="border-collapse: collapse; border: 1px solid transparent; width: 100%;"><colgroup><col style="width: 100.0000%;"></colgroup>
+<tbody>
+<tr>
+<td valign="top" style="background: #F2F2F2; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="line-height: normal;"><span style="font-size: 8.5pt; font-family: Consolas; color: black;">E_i = S_i + D_i<br>T = max(E_i)</span><span style="line-height: normal;"></span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">Record </span><span style="font-family: 宋体;">和</span><span style="line-height: normal;"> Wait </span><span style="font-family: 宋体;">不单独加到</span><span style="line-height: normal;"> T </span><span style="font-family: 宋体;">上，但会推迟后续</span><span style="line-height: normal;"> Compute</span><span style="font-family: 宋体;">，因此已反映在</span><span style="line-height: normal;"> T </span><span style="font-family: 宋体;">中。</span><span style="line-height: normal;">T </span><span style="font-family: 宋体;">必须</span><span style="line-height: normal;"> &lt;= deadline_us</span><span style="font-family: 宋体;">。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">任意时刻正在计算的</span><span style="line-height: normal;"> AIC / AIV </span><span style="font-family: 宋体;">算子</span><span style="line-height: normal;"> core_num </span><span style="font-family: 宋体;">之和分别不得超过对应核数上限。</span><span style="line-height: normal;">Record </span><span style="font-family: 宋体;">和</span><span style="line-height: normal;"> Wait </span><span style="font-family: 宋体;">不占计算核心。零长度区间不占显存。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">workspace </span><span style="font-family: 宋体;">在</span><span style="line-height: normal;"> [S_i, E_i) </span><span style="font-family: 宋体;">内存活；</span><span style="line-height: normal;">output </span><span style="font-family: 宋体;">从</span><span style="line-height: normal;"> S_i </span><span style="font-family: 宋体;">开始存活。同一输出只保存一份，不因多个消费者重复计入。</span><span style="line-height: normal;"></span></p>
+<p style="page-break-after: avoid; line-height: 1.6; margin: 8.0pt 0cm 6.0pt 0cm;"><b><span style="font-size: 12.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">3.3 </span></b><b><span style="font-size: 12.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">输入保证与提交</span></b><span style="line-height: 1.6;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">• </span><span style="font-family: 宋体;">输入</span><span style="line-height: normal;"> DAG </span><span style="font-family: 宋体;">无环，算子</span><span style="line-height: normal;"> ID </span><span style="font-family: 宋体;">全局唯一；每个算子的资源需求不超过硬件上限。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">• 1 &lt;= aic_core_num, aiv_core_num &lt;= 128</span><span style="font-family: 宋体;">；</span><span style="line-height: normal;">1 &lt;= exec_time &lt;= 10^9</span><span style="font-family: 宋体;">；</span><span style="line-height: normal;">0 &lt;= event_record_time, event_wait_time &lt;= 10^6</span><span style="font-family: 宋体;">。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">• 1 &lt;= core_num</span><span style="font-family: 宋体;">，且不超过对应类型总核数；</span><span style="line-height: normal;">workspace_memory + output_memory &lt;= memory_limit &lt;= 10^9</span><span style="font-family: 宋体;">。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">• inputs </span><span style="font-family: 宋体;">中的</span><span style="line-height: normal;"> ID </span><span style="font-family: 宋体;">均存在、不重复，且不等于当前算子</span><span style="line-height: normal;"> ID</span><span style="font-family: 宋体;">；算子</span><span style="line-height: normal;"> ID </span><span style="font-family: 宋体;">与</span><span style="line-height: normal;"> operators </span><span style="font-family: 宋体;">记录顺序均不保证为拓扑序。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">• </span><span style="font-family: 宋体;">所有时间计算均可放入有符号</span><span style="line-height: normal;"> 64 </span><span style="font-family: 宋体;">位整数。</span><span style="line-height: normal;">deadline_us </span><span style="font-family: 宋体;">是图的业务截止时间，不是程序运行时限。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">• </span><span style="font-family: 宋体;">至少存在一种方案可在</span><span style="line-height: normal;"> deadline_us </span><span style="font-family: 宋体;">内合法完成。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">• </span><span style="font-family: 宋体;">提交</span><span style="line-height: normal;"> solution/solution.cpp </span><span style="font-family: 宋体;">和</span><span style="line-height: normal;"> solution/README.md</span><span style="font-family: 宋体;">；自测用例与辅助材料可选。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">提交包内容：</span><span style="line-height: normal;"></span></p>
+<table class="data-preserve-origin-style" border="1" cellspacing="0" cellpadding="0" style="border-collapse: collapse; border: 1px solid transparent; width: 100%;"><colgroup><col style="width: 100.0000%;"></colgroup>
+<tbody>
+<tr>
+<td valign="top" style="background: #F2F2F2; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="line-height: normal;"><span style="font-size: 8.5pt; font-family: Consolas; color: black;">solution/solution.cpp<span style="line-height: normal;">&nbsp;&nbsp; </span># </span><span style="font-size: 8.5pt; font-family: Consolas; color: black;">必需，实现<span style="line-height: normal;"> ScheduleCvGraph<br>solution/README.md<span style="line-height: normal;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span># </span>必需，简要说明算法思路和复杂度<span style="line-height: normal;"><br>solution/tests/<span style="line-height: normal;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span># </span>可选，自测用例<span style="line-height: normal;"><br>solution/assets/<span style="line-height: normal;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span># </span>可选，辅助说明材料</span><span style="line-height: normal;"></span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">公开样例与回归数据只用于本地理解和验证。正式评测使用结构和规模不同的隐藏数据。</span><span style="line-height: normal;"></span></p>
+<p style="page-break-after: avoid; line-height: 1.6; margin: 14.0pt 0cm 6.0pt 0cm;"><b><span style="font-size: 15.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">四、参考资料</span></b><span style="line-height: 1.6;"></span></p>
+<p style="page-break-after: avoid; line-height: 1.6; margin: 8.0pt 0cm 6.0pt 0cm;"><b><span style="font-size: 12.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">4.1 </span></b><b><span style="font-size: 12.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">用例<span style="line-height: 150%;">1</span></span></b><span style="line-height: 1.6;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">硬件：</span><span style="line-height: normal;">AIC=16</span><span style="font-family: 宋体;">，</span><span style="line-height: normal;">AIV=12</span><span style="font-family: 宋体;">，</span><span style="line-height: normal;">Stream=3</span><span style="font-family: 宋体;">，显存</span><span style="line-height: normal;">=400</span><span style="font-family: 宋体;">，</span><span style="line-height: normal;">Record=2 us</span><span style="font-family: 宋体;">，</span><span style="line-height: normal;">Wait=3 us</span><span style="font-family: 宋体;">，</span><span style="line-height: normal;">deadline_us=430</span><span style="font-family: 宋体;">。下表为算子</span><span style="line-height: normal;"> DAG </span><span style="font-family: 宋体;">的节点信息。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">对应本地文件</span><span style="line-height: normal;"> test_cases/sample.case</span><span style="font-family: 宋体;">。</span><span style="line-height: normal;"></span></p>
+<table class="data-preserve-origin-style" border="1" cellspacing="0" cellpadding="0" style="border-collapse: collapse; border: 1px solid transparent; width: 100%;"><colgroup><col style="width: 100.0000%;"></colgroup>
+<tbody>
+<tr>
+<td valign="top" style="background: #F2F2F2; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="line-height: normal;"><span style="font-size: 8.5pt; font-family: Consolas; color: black;">HardwareInfo hardware{16, 12, 3, 400, 2, 3};<br>// aic_core_num, aiv_core_num, stream_num, memory_limit,<br>// event_record_time, event_wait_time<br>std::int64_t deadline_us = 430;</span><span style="line-height: normal;"></span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p style="margin-bottom: 1.0pt; line-height: 1.6;"><span style="line-height: 1.6;">&nbsp;</span></p>
+<table class="data-preserve-origin-style" border="1" cellspacing="0" cellpadding="0" style="border-collapse: collapse; border: 1px solid transparent; width: 100%;"><colgroup><col style="width: 14.2857%;"><col style="width: 14.2857%;"><col style="width: 14.2857%;"><col style="width: 14.2857%;"><col style="width: 14.2857%;"><col style="width: 14.2857%;"><col style="width: 14.2857%;"></colgroup>
+<tbody>
+<tr>
+<td style="border: solid black 1.0pt; background: #1F4E78; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6; color: white;"><b style="color: white;"><span style="font-size: 8.5pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: white;">ID</span></b><span style="; color: white;"></span></p>
+</td>
+<td style="border: solid black 1.0pt; border-left: none; background: #1F4E78; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6; color: white;"><b style="color: white;"><span style="font-size: 8.5pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: white;">类型</span></b><span style="; color: white;"></span></p>
+</td>
+<td style="border: solid black 1.0pt; border-left: none; background: #1F4E78; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6; color: white;"><b style="color: white;"><span style="font-size: 8.5pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: white;">核数</span></b><span style="; color: white;"></span></p>
+</td>
+<td style="border: solid black 1.0pt; border-left: none; background: #1F4E78; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6; color: white;"><b style="color: white;"><span style="font-size: 8.5pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: white;">时间</span></b><span style="; color: white;"></span></p>
+</td>
+<td style="border: solid black 1.0pt; border-left: none; background: #1F4E78; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6; color: white;"><b style="color: white;"><span style="font-size: 8.5pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: white;">workspace</span></b><span style="; color: white;"></span></p>
+</td>
+<td style="border: solid black 1.0pt; border-left: none; background: #1F4E78; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6; color: white;"><b style="color: white;"><span style="font-size: 8.5pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: white;">output</span></b><span style="; color: white;"></span></p>
+</td>
+<td style="border: solid black 1.0pt; border-left: none; background: #1F4E78; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6; color: white;"><b style="color: white;"><span style="font-size: 8.5pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: white;">inputs</span></b><span style="; color: white;"></span></p>
+</td>
+</tr>
+<tr>
+<td style="border: solid black 1.0pt; border-top: none; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">0</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">AIV</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">4</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">40</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">60</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">40</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">{}</span><span style="line-height: 1.6;"></span></p>
+</td>
+</tr>
+<tr>
+<td style="border: solid black 1.0pt; border-top: none; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">1</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">AIV</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">6</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">50</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">70</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">50</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">{0}</span><span style="line-height: 1.6;"></span></p>
+</td>
+</tr>
+<tr>
+<td style="border: solid black 1.0pt; border-top: none; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">2</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">AIC</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">12</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">120</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">160</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">80</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">{1}</span><span style="line-height: 1.6;"></span></p>
+</td>
+</tr>
+<tr>
+<td style="border: solid black 1.0pt; border-top: none; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">3</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">AIC</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">6</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">70</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">90</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">20</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">{2}</span><span style="line-height: 1.6;"></span></p>
+</td>
+</tr>
+<tr>
+<td style="border: solid black 1.0pt; border-top: none; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">4</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">AIC</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">8</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">90</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">100</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">30</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">{2}</span><span style="line-height: 1.6;"></span></p>
+</td>
+</tr>
+<tr>
+<td style="border: solid black 1.0pt; border-top: none; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">5</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">AIV</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">8</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">60</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">80</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">10</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">{3,4}</span><span style="line-height: 1.6;"></span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">DAG</span><span style="font-family: 宋体;">：</span><span style="line-height: normal;"></span></p>
+<table class="data-preserve-origin-style" border="1" cellspacing="0" cellpadding="0" style="border-collapse: collapse; border: 1px solid transparent; width: 100%;"><colgroup><col style="width: 100.0000%;"></colgroup>
+<tbody>
+<tr>
+<td valign="top" style="background: #F2F2F2; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="line-height: normal;"><span style="font-size: 8.5pt; font-family: Consolas; color: black;"><span style="line-height: normal;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span>/-&gt; 3 -\<br>0 -&gt; 1 -&gt; 2<span style="line-height: normal;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span>-&gt; 5<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span>\-&gt; 4 -/</span><span style="line-height: normal;"></span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">一种合法方案（</span><span style="line-height: normal;">streams </span><span style="font-family: 宋体;">下标即</span><span style="line-height: normal;"> Stream </span><span style="font-family: 宋体;">编号）：</span><span style="line-height: normal;"></span></p>
+<table class="data-preserve-origin-style" border="1" cellspacing="0" cellpadding="0" style="border-collapse: collapse; border: 1px solid transparent; width: 100%;"><colgroup><col style="width: 100.0000%;"></colgroup>
+<tbody>
+<tr>
+<td valign="top" style="background: #F2F2F2; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="line-height: normal;"><span style="font-size: 8.5pt; font-family: Consolas; color: black;">StreamPlan stream0;<br>stream0.tasks = {<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>{0, {}, -1},<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>{1, {}, -1},<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>{2, {}, 0},<span style="line-height: normal;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span>// Op2 </span><span style="font-size: 8.5pt; font-family: Consolas; color: black;">后<span style="line-height: normal;"> Record Event0<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>{4, {}, -1},<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>{5, {1}, -1},<span style="line-height: normal;">&nbsp;&nbsp;&nbsp;&nbsp; </span>// Op5 </span>前<span style="line-height: normal;"> Wait Event1<br>};<br>StreamPlan stream1;<br>stream1.tasks = {<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>{3, {0}, 1},<span style="line-height: normal;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span>// Wait Event0</span>，<span style="line-height: normal;">Op3 </span>后<span style="line-height: normal;"> Record Event1<br>};<br>plan.streams = {stream0, stream1};</span></span><span style="line-height: normal;"></span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">示意图（实线为同流顺序，虚线为</span><span style="line-height: normal;"> Event </span><span style="font-family: 宋体;">同步；图中已标注各段时间）：</span><span style="line-height: normal;"></span></p>
+<p style="text-align: center; line-height: 1.6;"><br></p>
+<div>
+<div class="csw-upload-pic-fail">
+<div class="csw-upload-pic-fail-area">
+<div class="csw-upload-pic-area"><span class="csw-upload-pic"><img src="https://www.chaspark.com/chasiwu/media/v1/tinyimage/1326715650925625344.png?state=2&auth_key=1791447380-kevbmbrfkp4amxux8ttbsekktkx2v8f0-0-49074a68178ce1358cab13cdf0eb4296585eaf5cc698496f81cbb21da5af964c&translate_time=1791447382"></span></div>
+<div class="csw-upload-pic-fail-tips"><br></div>
+</div>
+</div>
+</div>
+<p style="font-family: sans-serif !important; color: rgb(0, 0, 0) !important; font-size: 16px !important;"><br></p>
+<p style="margin-bottom: 7.0pt; text-align: center; line-height: 1.6;"><span style="font-size: 9.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">图<span style="line-height: 150%;"> 1<span style="line-height: 150%;">&nbsp; </span></span>用例<span style="line-height: 150%;">1</span>的两流调度与<span style="line-height: 150%;"> Event </span>同步</span><span style="line-height: 1.6;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">Op3 </span><span style="font-family: 宋体;">与</span><span style="line-height: normal;"> Op4 </span><span style="font-family: 宋体;">重叠时，</span><span style="line-height: normal;">AIC </span><span style="font-family: 宋体;">核数为</span><span style="line-height: normal;"> 6+8=14</span><span style="font-family: 宋体;">，不超过</span><span style="line-height: normal;"> 16</span><span style="font-family: 宋体;">；峰值显存为</span><span style="line-height: normal;"> 320 MiB</span><span style="font-family: 宋体;">。因此该方案</span><span style="line-height: normal;"> T=365 us</span><span style="font-family: 宋体;">。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">判题器推导出的时间线：</span><span style="line-height: normal;"></span></p>
+<table class="data-preserve-origin-style" border="1" cellspacing="0" cellpadding="0" style="border-collapse: collapse; border: 1px solid transparent; width: 100%;"><colgroup><col style="width: 100.0000%;"></colgroup>
+<tbody>
+<tr>
+<td valign="top" style="background: #F2F2F2; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="line-height: normal;"><span style="font-size: 8.5pt; font-family: Consolas; color: black;">Stream 0:<br><span style="line-height: normal;">&nbsp; </span>Op0 Compute<span style="line-height: normal;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span>[<span style="line-height: normal;">&nbsp; </span>0,<span style="line-height: normal;">&nbsp; </span>40)<br><span style="line-height: normal;">&nbsp; </span>Op1 Compute<span style="line-height: normal;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span>[ 40,<span style="line-height: normal;">&nbsp; </span>90)<br><span style="line-height: normal;">&nbsp; </span>Op2 Compute<span style="line-height: normal;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span>[ 90, 210)<br><span style="line-height: normal;">&nbsp; </span>Event0 Record<span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>[210, 212)<br><span style="line-height: normal;">&nbsp; </span>Op4 Compute<span style="line-height: normal;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span>[212, 302)<br><span style="line-height: normal;">&nbsp; </span>Event1 Wait<span style="line-height: normal;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span>[302, 305)<br><span style="line-height: normal;">&nbsp; </span>Op5 Compute<span style="line-height: normal;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span>[305, 365)<br><br>Stream 1:<br><span style="line-height: normal;">&nbsp; </span>Event0 Wait<span style="line-height: normal;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span>[212, 215)<br><span style="line-height: normal;">&nbsp; </span>Op3 Compute<span style="line-height: normal;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span>[215, 285)<br><span style="line-height: normal;">&nbsp; </span>Event1 Record<span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>[285, 287)</span><span style="line-height: normal;"></span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">重叠期间显存</span><span style="line-height: normal;"> = Op2 output 80 + Op3 </span><span style="font-family: 宋体;">的</span><span style="line-height: normal;"> 90+20 + Op4 </span><span style="font-family: 宋体;">的</span><span style="line-height: normal;"> 100+30 = 320 &lt;= 400</span><span style="font-family: 宋体;">。串行基线为</span><span style="line-height: normal;"> 430 us</span><span style="font-family: 宋体;">。</span><span style="line-height: normal;">Op5 </span><span style="font-family: 宋体;">只跨流等待</span><span style="line-height: normal;"> Event1</span><span style="font-family: 宋体;">，</span><span style="line-height: normal;">k=1</span><span style="font-family: 宋体;">，</span><span style="line-height: normal;">Wait </span><span style="font-family: 宋体;">耗时</span><span style="line-height: normal;"> 3</span><span style="font-family: 宋体;">。</span><span style="line-height: normal;">k</span><span style="font-family: 宋体;">表示算子执行前需要等待的</span><span style="line-height: normal;">Stream</span><span style="font-family: 宋体;">个数。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">若把</span><span style="line-height: normal;"> Op3</span><span style="font-family: 宋体;">、</span><span style="line-height: normal;">Op4 </span><span style="font-family: 宋体;">都放到与</span><span style="line-height: normal;"> Op5 </span><span style="font-family: 宋体;">不同的</span><span style="line-height: normal;"> Stream</span><span style="font-family: 宋体;">，则</span><span style="line-height: normal;"> Op5 </span><span style="font-family: 宋体;">的</span><span style="line-height: normal;"> k = 2</span><span style="font-family: 宋体;">，</span><span style="line-height: normal;">Wait </span><span style="font-family: 宋体;">耗时</span><span style="line-height: normal;"> 2 * 3 = 6</span><span style="font-family: 宋体;">。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">若把同一张图的</span><span style="line-height: normal;"> deadline </span><span style="font-family: 宋体;">改为</span><span style="line-height: normal;"> 400 us</span><span style="font-family: 宋体;">（本地</span><span style="line-height: normal;"> tight_deadline.case</span><span style="font-family: 宋体;">），串行</span><span style="line-height: normal;"> 430 </span><span style="font-family: 宋体;">会失败，本并行方案仍合法。</span><span style="line-height: normal;"></span></p>
+<p style="page-break-after: avoid; line-height: 1.6; margin: 8.0pt 0cm 6.0pt 0cm;"><b><span style="font-size: 12.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">4.2 </span></b><b><span style="font-size: 12.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">用例<span style="line-height: 150%;">2</span></span></b><span style="line-height: 1.6;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">AIC </span><span style="font-family: 宋体;">和</span><span style="line-height: normal;"> AIV </span><span style="font-family: 宋体;">的核数分别统计，因而</span><span style="line-height: normal;"> Op0 </span><span style="font-family: 宋体;">与</span><span style="line-height: normal;"> Op1 </span><span style="font-family: 宋体;">可并行。</span><span style="line-height: normal;">Op0 </span><span style="font-family: 宋体;">对</span><span style="line-height: normal;"> Op2 </span><span style="font-family: 宋体;">的跨流依赖通过</span><span style="line-height: normal;"> Event E0 </span><span style="font-family: 宋体;">同步，方案</span><span style="line-height: normal;"> T=124 us</span><span style="font-family: 宋体;">。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">对应</span><span style="line-height: normal;"> tests/cases/heterogeneous.case</span><span style="font-family: 宋体;">。</span><span style="line-height: normal;"></span></p>
+<table class="data-preserve-origin-style" border="1" cellspacing="0" cellpadding="0" style="border-collapse: collapse; border: 1px solid transparent; width: 100%;"><colgroup><col style="width: 100.0000%;"></colgroup>
+<tbody>
+<tr>
+<td valign="top" style="background: #F2F2F2; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="line-height: normal;"><span style="font-size: 8.5pt; font-family: Consolas; color: black;">HardwareInfo hardware{8, 8, 2, 200, 2, 2};<br>std::int64_t deadline_us = 200;</span><span style="line-height: normal;"></span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p style="margin-bottom: 1.0pt; line-height: 1.6;"><span style="line-height: 1.6;">&nbsp;</span></p>
+<table class="data-preserve-origin-style" border="1" cellspacing="0" cellpadding="0" style="border-collapse: collapse; border: 1px solid transparent; width: 100%;"><colgroup><col style="width: 14.2857%;"><col style="width: 14.2857%;"><col style="width: 14.2857%;"><col style="width: 14.2857%;"><col style="width: 14.2857%;"><col style="width: 14.2857%;"><col style="width: 14.2857%;"></colgroup>
+<tbody>
+<tr>
+<td style="background: #1F4E78; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6; color: white;"><b style="color: white;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: white;">ID</span></b><span style="; color: white;"></span></p>
+</td>
+<td style="background: #1F4E78; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6; color: white;"><b style="color: white;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: white;">类型</span></b><span style="; color: white;"></span></p>
+</td>
+<td style="background: #1F4E78; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6; color: white;"><b style="color: white;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: white;">核数</span></b><span style="; color: white;"></span></p>
+</td>
+<td style="background: #1F4E78; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6; color: white;"><b style="color: white;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: white;">时间</span></b><span style="; color: white;"></span></p>
+</td>
+<td style="background: #1F4E78; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6; color: white;"><b style="color: white;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: white;">workspace</span></b><span style="; color: white;"></span></p>
+</td>
+<td style="background: #1F4E78; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6; color: white;"><b style="color: white;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: white;">output</span></b><span style="; color: white;"></span></p>
+</td>
+<td style="background: #1F4E78; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6; color: white;"><b style="color: white;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: white;">inputs</span></b><span style="; color: white;"></span></p>
+</td>
+</tr>
+<tr>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">0</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">AIC</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">8</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">100</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">20</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">10</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">{}</span><span style="line-height: 1.6;"></span></p>
+</td>
+</tr>
+<tr>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">1</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">AIV</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">4</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">80</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">15</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">10</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">{}</span><span style="line-height: 1.6;"></span></p>
+</td>
+</tr>
+<tr>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">2</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">AIV</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">4</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">20</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">10</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">5</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">{0,1}</span><span style="line-height: 1.6;"></span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">一种合法方案：</span><span style="line-height: normal;"></span></p>
+<table class="data-preserve-origin-style" border="1" cellspacing="0" cellpadding="0" style="border-collapse: collapse; border: 1px solid transparent; width: 100%;"><colgroup><col style="width: 100.0000%;"></colgroup>
+<tbody>
+<tr>
+<td valign="top" style="background: #F2F2F2; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="line-height: normal;"><span style="font-size: 8.5pt; font-family: Consolas; color: black;">stream0.tasks = {{0, {}, 0}};<br>stream1.tasks = {<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>{1, {}, -1},<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>{2, {0}, -1},<br>};</span><span style="line-height: normal;"></span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">Op1 -&gt; Op2 </span><span style="font-family: 宋体;">由同流顺序保证；</span><span style="line-height: normal;">Op0 -&gt; Op2 </span><span style="font-family: 宋体;">跨流，因此需要</span><span style="line-height: normal;"> Event0</span><span style="font-family: 宋体;">。时间线：</span><span style="line-height: normal;"></span></p>
+<table class="data-preserve-origin-style" border="1" cellspacing="0" cellpadding="0" style="border-collapse: collapse; border: 1px solid transparent; width: 100%;"><colgroup><col style="width: 100.0000%;"></colgroup>
+<tbody>
+<tr>
+<td valign="top" style="background: #F2F2F2; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="line-height: normal;"><span style="font-size: 8.5pt; font-family: Consolas; color: black;">Stream 0: Op0 [0,100)<span style="line-height: normal;">&nbsp; </span>Record E0 [100,102)<br>Stream 1: Op1 [0,80)<span style="line-height: normal;">&nbsp;&nbsp; </span></span><span style="font-size: 8.5pt; font-family: Consolas; color: black;">空闲<span style="line-height: normal;"> [80,102)<span style="line-height: normal;">&nbsp; </span>Wait E0 [102,104)<span style="line-height: normal;">&nbsp; </span>Op2 [104,124)</span></span><span style="line-height: normal;"></span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">Op0 </span><span style="font-family: 宋体;">与</span><span style="line-height: normal;"> Op1 </span><span style="font-family: 宋体;">在</span><span style="line-height: normal;"> [0,80) </span><span style="font-family: 宋体;">重叠时，</span><span style="line-height: normal;">AIC=8</span><span style="font-family: 宋体;">，</span><span style="line-height: normal;">AIV=4</span><span style="font-family: 宋体;">，显存</span><span style="line-height: normal;">=(20+10)+(15+10)=55 &lt;= 200</span><span style="font-family: 宋体;">。单流串行需要</span><span style="line-height: normal;"> 200 us</span><span style="font-family: 宋体;">。</span><span style="line-height: normal;"></span></p>
+<p style="text-align: center; line-height: 1.6;"><br></p>
+<div>
+<div class="csw-upload-pic-fail">
+<div class="csw-upload-pic-fail-area">
+<div class="csw-upload-pic-area"><span class="csw-upload-pic"><img src="https://www.chaspark.com/chasiwu/media/v1/tinyimage/1326715714884567040.png?state=2&auth_key=1791447395-g2855sn3gmmfhkmxh5ssh4lof3fbzfp5-0-159f766fd759244fd148362145f86f301cda602505e1954b7d5c1c7cf76eddf4&translate_time=1791447400"></span></div>
+</div>
+</div>
+</div>
+<p style="font-family: sans-serif !important; color: rgb(0, 0, 0) !important; font-size: 16px !important;"><br></p>
+<p style="margin-bottom: 7.0pt; text-align: center; line-height: 1.6;"><span style="font-size: 9.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">图<span style="line-height: 150%;"> 2<span style="line-height: 150%;">&nbsp; </span></span>用例<span style="line-height: 150%;">2</span>的异构并行调度</span><span style="line-height: 1.6;"></span></p>
+<p style="page-break-after: avoid; line-height: 1.6; margin: 8.0pt 0cm 6.0pt 0cm;"><b><span style="font-size: 12.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">4.3 </span></b><b><span style="font-size: 12.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">用例<span style="line-height: 150%;">3</span></span></b><span style="line-height: 1.6;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">Op0 </span><span style="font-family: 宋体;">与</span><span style="line-height: normal;"> Op1 </span><span style="font-family: 宋体;">没有数据依赖，但同时启动会超过显存限制。通过由</span><span style="line-height: normal;"> Op1 Record</span><span style="font-family: 宋体;">、</span><span style="line-height: normal;">Op0 Wait </span><span style="font-family: 宋体;">的额外</span><span style="line-height: normal;"> Event E0</span><span style="font-family: 宋体;">，可让关键路径</span><span style="line-height: normal;"> Op1 </span><span style="font-family: 宋体;">到</span><span style="line-height: normal;"> Op2 </span><span style="font-family: 宋体;">优先执行，完成时间由</span><span style="line-height: normal;"> 210 us </span><span style="font-family: 宋体;">缩短到</span><span style="line-height: normal;"> 152 us</span><span style="font-family: 宋体;">。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">对应</span><span style="line-height: normal;"> tests/cases/memory_arbitration.case</span><span style="font-family: 宋体;">。</span><span style="line-height: normal;"></span></p>
+<table class="data-preserve-origin-style" border="1" cellspacing="0" cellpadding="0" style="border-collapse: collapse; border: 1px solid transparent; width: 100%;"><colgroup><col style="width: 100.0000%;"></colgroup>
+<tbody>
+<tr>
+<td valign="top" style="background: #F2F2F2; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="line-height: normal;"><span style="font-size: 8.5pt; font-family: Consolas; color: black;">HardwareInfo hardware{8, 8, 2, 50, 2, 3};<br>std::int64_t deadline_us = 220;</span><span style="line-height: normal;"></span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p style="margin-bottom: 1.0pt; line-height: 1.6;"><span style="line-height: 1.6;">&nbsp;</span></p>
+<table class="data-preserve-origin-style" border="1" cellspacing="0" cellpadding="0" style="border-collapse: collapse; border: 1px solid transparent; width: 100%;"><colgroup><col style="width: 14.2857%;"><col style="width: 14.2857%;"><col style="width: 14.2857%;"><col style="width: 14.2857%;"><col style="width: 14.2857%;"><col style="width: 14.2857%;"><col style="width: 14.2857%;"></colgroup>
+<tbody>
+<tr>
+<td style="background: #1F4E78; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6; color: white;"><b style="color: white;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: white;">ID</span></b><span style="; color: white;"></span></p>
+</td>
+<td style="background: #1F4E78; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6; color: white;"><b style="color: white;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: white;">类型</span></b><span style="; color: white;"></span></p>
+</td>
+<td style="background: #1F4E78; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6; color: white;"><b style="color: white;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: white;">核数</span></b><span style="; color: white;"></span></p>
+</td>
+<td style="background: #1F4E78; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6; color: white;"><b style="color: white;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: white;">时间</span></b><span style="; color: white;"></span></p>
+</td>
+<td style="background: #1F4E78; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6; color: white;"><b style="color: white;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: white;">workspace</span></b><span style="; color: white;"></span></p>
+</td>
+<td style="background: #1F4E78; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6; color: white;"><b style="color: white;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: white;">output</span></b><span style="; color: white;"></span></p>
+</td>
+<td style="background: #1F4E78; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6; color: white;"><b style="color: white;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: white;">inputs</span></b><span style="; color: white;"></span></p>
+</td>
+</tr>
+<tr>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">0</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">AIC</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">4</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">60</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">20</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">10</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">{}</span><span style="line-height: 1.6;"></span></p>
+</td>
+</tr>
+<tr>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">1</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">AIV</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">4</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">50</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">20</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">5</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">{}</span><span style="line-height: 1.6;"></span></p>
+</td>
+</tr>
+<tr>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">2</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">AIC</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">4</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">100</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">5</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="text-align: center; line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">5</span><span style="line-height: 1.6;"></span></p>
+</td>
+<td style="background: white; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="line-height: 1.6;"><span style="font-size: 8.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">{1}</span><span style="line-height: 1.6;"></span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">一种合法方案（</span><span style="line-height: normal;">Event0 </span><span style="font-family: 宋体;">不是原始</span><span style="line-height: normal;"> DAG </span><span style="font-family: 宋体;">边，只用于让关键分支先执行）：</span><span style="line-height: normal;"></span></p>
+<table class="data-preserve-origin-style" border="1" cellspacing="0" cellpadding="0" style="border-collapse: collapse; border: 1px solid transparent; width: 100%;"><colgroup><col style="width: 100.0000%;"></colgroup>
+<tbody>
+<tr>
+<td valign="top" style="background: #F2F2F2; padding: 0cm 5.4pt 0cm 5.4pt;">
+<p style="line-height: normal;"><span style="font-size: 8.5pt; font-family: Consolas; color: black;">stream0.tasks = { {0, {0}, -1} };<span style="line-height: normal;">&nbsp;&nbsp; </span>// Op0 </span><span style="font-size: 8.5pt; font-family: Consolas; color: black;">前额外<span style="line-height: normal;"> Wait Event0<br>stream1.tasks = {<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>{1, {}, 0},<span style="line-height: normal;">&nbsp;&nbsp;&nbsp;&nbsp; </span>// Op1 </span>后<span style="line-height: normal;"> Record Event0<br><span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>{2, {}, -1},<span style="line-height: normal;">&nbsp;&nbsp;&nbsp; </span>// Op1 -&gt; Op2 </span>同流<span style="line-height: normal;"><br>};</span></span><span style="line-height: normal;"></span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="line-height: normal;">Op1 </span><span style="font-family: 宋体;">在时刻</span><span style="line-height: normal;"> 0 </span><span style="font-family: 宋体;">启动；</span><span style="line-height: normal;">Event0 </span><span style="font-family: 宋体;">在</span><span style="line-height: normal;"> 52 us ready</span><span style="font-family: 宋体;">；</span><span style="line-height: normal;">Op0 Wait 3 us </span><span style="font-family: 宋体;">后于</span><span style="line-height: normal;"> 55 us </span><span style="font-family: 宋体;">启动，可与</span><span style="line-height: normal;"> Op2 </span><span style="font-family: 宋体;">重叠。</span><span style="line-height: normal;"></span></p>
+<p style="text-align: center; line-height: 1.6;"><br></p>
+<div>
+<div class="csw-upload-pic-fail">
+<div class="csw-upload-pic-fail-area">
+<div class="csw-upload-pic-area"><span class="csw-upload-pic"><img src="https://www.chaspark.com/chasiwu/media/v1/tinyimage/1326715760841555968.png?state=2&auth_key=1791447406-2jvny20kqcktilxfjbkalkwel7lk6jnv-0-3c0bb2a49590c244e40b07e56283f7ef242bdd2bff43ab1cac73168c7976ee70&translate_time=1791447409"></span></div>
+</div>
+</div>
+</div>
+<p style="font-family: sans-serif !important; color: rgb(0, 0, 0) !important; font-size: 16px !important;"><br></p>
+<p style="margin-bottom: 7.0pt; text-align: center; line-height: 1.6;"><span style="font-size: 9.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">图<span style="line-height: 150%;"> 3<span style="line-height: 150%;">&nbsp; </span></span>用例<span style="line-height: 150%;">3</span>中额外<span style="line-height: 150%;"> Event </span>调整资源竞争顺序</span><span style="line-height: 1.6;"></span></p>
+<p style="page-break-after: avoid; line-height: 1.6; margin: 14.0pt 0cm 6.0pt 0cm;"><b><span style="font-size: 15.0pt; line-height: 150%; font-family: '微软雅黑',sans-serif; color: black;">五、评选标准</span></b><span style="line-height: 1.6;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">•</span> <span style="font-family: 宋体;">调度方案必须合法、正确完成全部算子，并满足</span><span style="line-height: normal;"> T </span><span style="font-family: 宋体;">不超过</span><span style="line-height: normal;"> deadline_us</span><span style="font-family: 宋体;">。满足前提的方案按</span><span style="line-height: normal;"> T </span><span style="font-family: 宋体;">升序排序；</span><span style="line-height: normal;">T </span><span style="font-family: 宋体;">相同时按峰值显存升序排序；两项相同则并列。判题程序负责验证方案合法性，并统计</span><span style="line-height: normal;"> T </span><span style="font-family: 宋体;">和峰值显存。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">•</span> <span style="font-family: 宋体;">单</span><span style="line-height: normal;"> Stream </span><span style="font-family: 宋体;">方案合法。判题器会先删除空</span><span style="line-height: normal;"> Stream </span><span style="font-family: 宋体;">并压缩流号，再检查合法性；空</span><span style="line-height: normal;"> Stream </span><span style="font-family: 宋体;">不是非法条件。</span><span style="line-height: normal;">Event ID </span><span style="font-family: 宋体;">只用于标识同步对象，不参与评分；判题器会把</span><span style="line-height: normal;"> Record </span><span style="font-family: 宋体;">过的</span><span style="line-height: normal;"> ID </span><span style="font-family: 宋体;">按数值重映射为从</span><span style="line-height: normal;"> 0 </span><span style="font-family: 宋体;">开始的连续编号，稀疏编号不是非法条件。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">•</span> <span style="font-family: 宋体;">多前驱混合同步：若消费者</span><span style="line-height: normal;"> v </span><span style="font-family: 宋体;">同时依赖</span><span style="line-height: normal;"> u1 </span><span style="font-family: 宋体;">和</span><span style="line-height: normal;"> u2</span><span style="font-family: 宋体;">，</span><span style="line-height: normal;">u1 </span><span style="font-family: 宋体;">与</span><span style="line-height: normal;"> v </span><span style="font-family: 宋体;">位于同一</span><span style="line-height: normal;"> Stream </span><span style="font-family: 宋体;">且排在</span><span style="line-height: normal;"> v </span><span style="font-family: 宋体;">之前，而</span><span style="line-height: normal;"> u2 </span><span style="font-family: 宋体;">位于另一</span><span style="line-height: normal;"> Stream</span><span style="font-family: 宋体;">，则</span><span style="line-height: normal;"> v </span><span style="font-family: 宋体;">只需等待由</span><span style="line-height: normal;"> u2 </span><span style="font-family: 宋体;">记录的</span><span style="line-height: normal;"> Event</span><span style="font-family: 宋体;">；</span><span style="line-height: normal;">v </span><span style="font-family: 宋体;">仍可额外等待其他</span><span style="line-height: normal;"> Stream </span><span style="font-family: 宋体;">的</span><span style="line-height: normal;"> Event</span><span style="font-family: 宋体;">，以主动规避核心或显存冲突。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">•</span> <span style="font-family: 宋体;">正式评测覆盖不同图结构、异构资源组合和显存压力。具体聚合公式、隐藏用例权重及内部参考值不对外公开。评测平台施加统一的运行时间、内存与环境限制；超时、异常或崩溃均视为该用例无效。具体资源阈值由评委在统一环境中固定执行。</span><span style="line-height: normal;"></span></p>
+<p style="text-indent: 21.0pt; line-height: normal; overflow-x: auto;"><span style="font-family: 宋体;">•</span> <span style="font-family: 宋体;">代码质量由出题组综合评审，包括功能正确性、算法复杂度、</span><span style="line-height: normal;">C++ </span><span style="font-family: 宋体;">编码规范、可读性和健壮性。具有独立创新性的算法设计，以及完整的算法说明和复杂度分析，可作为额外加分项。</span><span style="line-height: normal;"></span></p>

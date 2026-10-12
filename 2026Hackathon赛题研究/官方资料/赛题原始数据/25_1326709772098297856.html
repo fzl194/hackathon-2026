@@ -1,0 +1,791 @@
+<h1 style="line-height: 115%; text-align: center;"><span style="font-size: 18pt; line-height: 115%; font-family: 微软雅黑, sans-serif;">状态感知模型路由</span><span style="line-height: 115%;"></span></h1>
+<p style="font-family: sans-serif !important; color: rgb(0, 0, 0) !important; font-size: 16px !important;"><span style="font-size: 21.0pt; line-height: 115%; font-family: '微软雅黑',sans-serif;"></span></p>
+<h2 style="line-height: 125%;"><span style="font-size: 17.0pt; line-height: 125%; font-family: '微软雅黑',sans-serif;">背景</span><span style="line-height: 125%;"></span></h2>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="font-size: 12.5pt; font-family: 微软雅黑; color: #2f3e4a;">模型路由根据请求的任务、难度和上下文，选择合适的候选模型。路由策略需要在回答质量或任务成功率与推理成本之间取得平衡。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">在实际部署中，路由策略还需要考虑时延、资源负载、服务可用性和数据隐私。因此，不同请求可以使用不同的模型。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="font-family: 微软雅黑;">模型选择和部署位置是两个不同的因素。路由程序可以在端侧模型与云侧模型之间选择，也可以在同一设备或计算节点上的多个模型之间选择。</span><span style="font-family: '微软雅黑',sans-serif;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">本题将可供选择的模型称为“候选模型”。“模型实例”是部署并运行某个模型、能够接收请求的服务单元。同一模型可以部署多个实例。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">实例调度还需要考虑队列状态、资源负载和缓存复用情况。本题在模型选择的基础上增加了这些调度要求，并非所有模型路由基准都包含这些要求。</span><span style="line-height: 17pt;"></span></p>
+<h3><span style="font-size: 13.5pt; line-height: 144%; font-family: '微软雅黑',sans-serif;">基本运行原理</span><span></span></h3>
+<p style="margin-bottom: 6.0pt; line-height: normal;"><span style="line-height: normal;"><img width="100%" height="326" src="https://www.chaspark.com/chasiwu/media/v1/tinyimage/1326985591855763456.png?state=2&auth_key=1791511739-0vhb0lyrcpozsy9tntnhlmckctdnozdi-0-2a3b1735c42db49243b2f055b9c9e0841a641657d6a86e98a09b07b0dbf1b320&translate_time=1791511760" alt="Picture 11"></span><span style="font-family: '微软雅黑',sans-serif;"><br><br></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">上图展示模型路由的通用原理。模型能力、部署位置和运行状态共同影响目标实例的选择。端云部署和同一节点上的多模型部署都适用。图中的两个场景与本题的两个评测维度没有对应关系。</span><span style="font-family: '微软雅黑',sans-serif;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">本题要求路由程序返回目标实例的<span style="line-height: 17pt;"> instance_id</span>。维度<span style="line-height: 17pt;"> A </span>允许程序选择不同模型的实例。维度<span style="line-height: 17pt;"> B </span>的每个场景只包含同一模型、同一版本的多个实例。参赛者无需部署图中的真实模型服务或端云基础设施。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><a style="color: unset; text-decoration: unset; border-bottom: unset;" rel="nofollow"><b><span style="font-family: '微软雅黑',sans-serif;">背景参考：</span></b></a><span style="line-height: 17pt;"><span style="font-family: 'Cambria',serif;"> </span></span><a href="https://arxiv.org/abs/2406.18665" style="color: unset; text-decoration: unset; border-bottom: unset;" rel="nofollow"><span style="line-height: 17pt;"><span class="Hyperlink0" style="line-height: 17pt;"><span style="font-family: 'Cambria',serif;">RouteLLM</span></span></span></a><span style="line-height: 17pt;"><span class="None" style="line-height: 17pt;"><span style="font-family: '微软雅黑',sans-serif;">、</span></span></span><span style="line-height: 17pt;"></span><a href="https://arxiv.org/abs/2403.12031" style="color: unset; text-decoration: unset; border-bottom: unset;" rel="nofollow"><span style="line-height: 17pt;"><span class="Hyperlink0" style="line-height: 17pt;"><span style="font-family: 'Cambria',serif;">RouterBench</span></span></span><span style="line-height: 17pt;"></span></a><span style="line-height: 17pt;"><span class="None" style="line-height: 17pt;"><span style="font-family: '微软雅黑',sans-serif;">、</span></span></span><span style="line-height: 17pt;"></span><a href="https://arxiv.org/abs/2601.07206" style="color: unset; text-decoration: unset; border-bottom: unset;" rel="nofollow"><span style="line-height: 17pt;"><span class="Hyperlink0" style="line-height: 17pt;"><span style="font-family: 'Cambria',serif;">LLMRouterBench</span></span></span><span style="line-height: 17pt;"></span></a><span style="line-height: 17pt;"><span class="None" style="line-height: 17pt;"><span style="font-family: '微软雅黑',sans-serif;">、</span></span></span><span style="line-height: 17pt;"></span><a href="https://www.usenix.org/conference/fast25/presentation/qin" style="color: unset; text-decoration: unset; border-bottom: unset;" rel="nofollow"><span style="line-height: 17pt;"><span class="Hyperlink0" style="line-height: 17pt;"><span style="font-family: 'Cambria',serif;">Mooncake</span></span></span><span style="line-height: 17pt;"><span class="None" style="line-height: 17pt;"><span style="font-family: 宋体; color: #0000ee;">（</span></span></span><span style="line-height: 17pt;"><span class="Hyperlink0" style="line-height: 17pt;"><span style="font-family: 'Cambria',serif;">FAST'25</span></span></span><span style="line-height: 17pt;"><span class="None" style="line-height: 17pt;"><span style="font-family: 宋体; color: #0000ee;">）</span></span></span><span style="line-height: 17pt;"></span></a><span style="line-height: 17pt;"><span class="None" style="line-height: 17pt;"><span style="font-family: '微软雅黑',sans-serif;">。</span></span></span><span style="line-height: 17pt;"></span></p>
+<h2 style="line-height: 125%;"><span class="None" style="line-height: 125%;"><span style="font-size: 17.0pt; line-height: 125%; font-family: '微软雅黑',sans-serif;">题目要求</span></span><span class="None" style="line-height: 125%;"><span style="line-height: 125%;"></span></span></h2>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">请实现一套模型路由软件。软件根据请求需求和系统状态选择目标实例。</span><span style="line-height: 17pt;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">本题通过两个维度评测同一套软件。维度<span style="line-height: 17pt;"> A </span>评测多个模型之间的语义路由。维度<span style="line-height: 17pt;"> B </span>评测同一模型多个实例之间的状态感知调度。软件通过评测配置切换模式，并在两个维度中都返回<span style="line-height: 17pt;"> instance_id</span>。参赛者无需实现两套系统。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">参赛者可以使用公开数据开发和训练路由算法。主办方使用不向参赛者发放的测试数据计算最终排名。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><b><span style="font-size: 9.0pt; font-family: '微软雅黑',sans-serif; color: #1769aa;">评测维度</span></b></span><span class="None" style="line-height: 17pt;"><b><span style="font-size: 9.0pt; font-family: '微软雅黑',sans-serif; color: #1769aa;"> </span></b></span><span class="None" style="line-height: 17pt;"><b><span style="font-size: 9.0pt; font-family: '微软雅黑',sans-serif; color: #1769aa;">A</span></b><span style="line-height: 17pt;"></span></span></p>
+<h3 style="margin-top: 0cm;"><span class="None"><span style="font-size: 13.5pt; line-height: 144%; font-family: '微软雅黑',sans-serif;">基础语义路由</span></span><span class="None"><span></span></span></h3>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="font-family: 微软雅黑;">维度 A 评测路由程序能否为不同请求选择合适的模型。评测器将每条请求作为独立样本，并固定候选实例的配置。该维度不模拟随请求变化的队列和缓存状态。</span><span style="line-height: 17pt;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">路由程序根据<span style="line-height: 17pt;"> query</span>、允许使用的任务信息和候选模型的能力，选择目标实例。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">本维度需要解决以下问题：哪些请求可以交给更小、更快、成本更低的模型？哪些请求需要能力更强的模型？在满足预先规定的质量要求后，如何兼顾任务成功率、模型计算成本和路由决策时延？</span><span style="line-height: 17pt;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">比赛不要求参赛者生成完整的质量与成本关系曲线，也不要求计算<span style="line-height: 17pt;"> AIQ </span>或<span style="line-height: 17pt;"> nAUC</span>。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">处理流程：接收独立请求 → 判断任务和能力需求 → 选择模型实例。评测器记录每条请求的质量、成本和路由决策时延，再按测试组计算分数。</span><span style="line-height: 17pt;"></span></span></p>
+<h3 style="margin-top: 0cm;"><span class="None"><span style="font-size: 13.5pt; line-height: 144%; font-family: '微软雅黑',sans-serif;">评测维度 B 系统动态路由</span></span><span class="None"><span></span></span></h3>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">维度<span style="line-height: 17pt;"> B </span>的每个场景包含同一模型、同一版本的多个实例。选择不同实例不会改变模型的回答质量。各实例的队列、任务进度、可复用前缀、缓存容量和可用性可以不同。</span><span style="line-height: 17pt;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">官方模拟器按请求到达时间回放请求。前面的路由决策会影响后面的队列和缓存状态。主办方使用<span style="line-height: 17pt;"> Mooncake </span>请求轨迹（<span style="line-height: 17pt;">trace</span>）构造请求到达时间、输入输出长度和前缀复用信息。<span style="line-height: 17pt;">Mooncake </span>请求轨迹不提供回答质量标签，本维度也不评测回答质量。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">本维度需要解决以下问题：某个实例可以复用更多<span style="line-height: 17pt;"> KV Cache</span>，但该实例已有排队请求或正在执行长任务。此时，应继续选择该实例，还是选择另一个较空闲的同模型实例？</span><span style="line-height: 17pt;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">路由程序应根据可见的任务进度、缓存复用机会、实例可用性和完成时限，平衡资源消耗与系统时延。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">处理流程：接收按时间到达的请求 → 读取前缀信息和实例状态 → 选择同一模型的一个实例。每次选择都会影响后续队列和缓存。评测重点是程序根据这些状态进行调度的能力。</span><span style="line-height: 17pt;"></span></span></p>
+<h3><a style="color: unset; text-decoration: unset; border-bottom: unset;" rel="nofollow"></a><span class="None"><span style="font-size: 13.5pt; line-height: 144%; font-family: '微软雅黑',sans-serif;">比赛交付件</span></span><span class="None"><span></span></span></h3>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="font-family: 微软雅黑;">请提交一份可独立启动的模型路由软件包。官方评测器将调用该软件包。交付内容需要包含可执行的路由程序，仅提交方案文档、演示页面或预先生成的路由结果不满足要求。</span></span><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">路由程序接收请求及评测允许提供的上下文，并返回目标实例标识。同一软件包应支持两个评测维度，并能根据评测配置切换运行模式。</span><span style="line-height: 17pt;"></span></p>
+<ul>
+<li style="margin-right: 0cm; margin-top: 0cm; margin-bottom: 6.0pt;"><span style="font-family: Symbol;"></span><span class="None"><span style="font-family: 微软雅黑;">路由程序：提交决策代码和可运行实现。实现语言、算法和内部模块划分不限。</span></span><span></span></li>
+<li style="margin-right: 0cm; margin-top: 0cm; margin-bottom: 6.0pt;"><span style="font-family: Symbol;"></span><span class="None"><span>运行材料：提交</span></span><span class="None"><span> router_manifest.json</span></span><span class="None"><span>。文件包含</span></span><span class="None"><span> protocol_version</span></span><span class="None"><span>、启动参数数组</span></span><span class="None"><span> argv</span></span><span class="None"><span>、相对工作目录</span></span><span class="None"><span> cwd </span></span><span class="None"><span>和方案版本。</span></span><span class="None"><span>评测器使用<span> argv </span>直接启动进程，不通过交互式<span> shell </span>启动。</span></span><span></span></li>
+</ul>
+<p style="line-height: 17.0pt; margin: 0cm 0cm 6.0pt 18.0pt;"><span style="line-height: 17pt;">将源码、依赖、配置、路由算法权重和索引放入交付目录，并附离线启动说明。<span style="line-height: 17pt;">argv[0] </span>可以指定交付目录内的可执行文件，也可以指定主办方预装且已公布版本的语言运行时。</span><span style="line-height: 17pt;"></span></p>
+<ul>
+<li style="margin-right: 0cm; margin-top: 0cm; margin-bottom: 6.0pt;"><span style="font-family: Symbol;"></span><span class="None"><span style="font-family: 微软雅黑;">方案说明：说明路由策略、所用数据、两个评测维度的处理方式和已知限制。提供启动步骤和结果复现方法。</span></span><span></span></li>
+</ul>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">参赛者负责实现路由决策软件。在开发、调试和正式评测中，参赛者均无需调用或部署候选大模型，也无需部署真实端云基础设施或实现官方评测器。</span><span style="line-height: 17pt;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">主办方提前离线准备候选模型的质量结果、<span style="line-height: 17pt;">token </span>记录、成本记录、实例目录和系统回放数据。主办方在评测前确定这些数据，并在正式评测期间保持不变。后文将这种做法称为“冻结”。正式评测通过查表和确定性模拟器计算结果，不在线生成回答，也不调用模型裁判。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">参赛者可以在赛前规则允许的资源范围内训练自己的路由算法。路由算法的依赖和权重须随软件包提交，并支持离线运行。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">本题评测路由算法判断请求特征、模型能力和系统状态的能力。路由程序及其依赖、权重和索引须在主办方公布的仅使用 CPU 的环境（CPU-only）中离线运行。</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">正式评测不提供<span style="line-height: 17pt;"> GPU</span>、候选大模型服务或外部网络。交付件不得依赖在线模型调用、在线训练、运行时模型下载或额外服务。这些限制用于控制模型规模和运行成本，使成绩主要反映路由策略、状态建模和工程实现能力。</span><span style="line-height: 17pt;"></span></p>
+<h2 style="line-height: 125%;"><span class="None" style="line-height: 125%;"><span style="font-size: 17.0pt; line-height: 125%; font-family: '微软雅黑',sans-serif;">评测目标与方法</span></span><span class="None" style="line-height: 125%;"><span style="line-height: 125%;"></span></span></h2>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">本节说明路由软件的输入输出、两个评测维度和计分方法。路由程序返回目标<span style="line-height: 17pt;"> instance_id </span>及请求关联字段。评测器使用隐藏测试数据运行程序，并通过查表或模拟计算加权成绩。参赛者无需自行完成完整的<span style="line-height: 17pt;"> AIQ </span>实验。</span><span style="line-height: 17pt;"></span></span></p>
+<div style="border: none; border-left: solid #A85A00 3.0pt; padding: 31.0pt 31.0pt 31.0pt 6.0pt; background: #FFF1DF;">
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt; background: #FFF1DF; border: none; padding: 0cm;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">主办方通过模拟器维护队列、任务和缓存。路由程序只维护自己的算法状态。</span><span style="line-height: 17pt;"></span></span></p>
+</div>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">路由程序读取当前请求和允许提供的实例状态快照，然后返回目标实例及请求关联字段。程序不得修改模拟器状态，也不负责申报质量分数、缓存命中量或资源用量。初始化、运行时字段和状态更新规则见附录。</span><span style="line-height: 17pt;"></span></p>
+<h3><span class="None"><span style="font-size: 13.5pt; line-height: 144%; font-family: '微软雅黑',sans-serif;">接口与运行要求</span></span><span></span></h3>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">正式接口采用版本<span style="line-height: 17pt;"> 1.0 </span>的有序<span style="line-height: 17pt;"> JSONL </span>协议。每条消息使用<span style="line-height: 17pt;"> UTF-8 </span>编码，并占一个物理行。消息以换行符结束。发送方写入消息后须立即刷新输出缓冲区。</span><span style="line-height: 17pt;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">路由程序仅通过标准输出（<span style="line-height: 17pt;">stdout</span>）发送协议消息，并通过标准错误（<span style="line-height: 17pt;">stderr</span>）输出日志。文中的<span style="line-height: 17pt;"> JSON </span>示例为了便于阅读而分为多行。实际传输时，每条<span style="line-height: 17pt;"> JSON </span>消息必须写在一行中。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">“评测单元”是独立运行和计分的最小单位。每次运行评测单元时，评测器都会重新启动路由程序。</span><span style="line-height: 17pt;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">维度<span style="line-height: 17pt;"> A </span>的一个评测单元称为“<span style="line-height: 17pt;">A </span>测试组”。主办方按任务类型和难度预先划分测试组，每组包含一批相互独立的请求。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">维度<span style="line-height: 17pt;"> B </span>的一个评测单元称为“<span style="line-height: 17pt;">B </span>场景”。每个场景包含按到达时间排列的完整请求序列，以及对应的队列、缓存和实例可用性状态。评测器在处理完评测单元中的全部请求后计算分数。</span><span style="line-height: 17pt;"></span></p>
+<div style="border: solid #DCE3E8 1.0pt; padding: 0cm 0cm 0cm 0cm; background: #F8FAFB;">
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt; page-break-after: avoid; background: #F8FAFB; border: none; padding: 0cm;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">路由程序按以下流程运行：</span><span style="line-height: 17pt;"></span></span></p>
+</div>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">1. </span><span style="line-height: 17pt;">评测器为当前评测单元启动一个新的路由程序进程。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">2. </span><span style="line-height: 17pt;">评测器发送<span style="line-height: 17pt;"> init </span>消息。路由程序完成初始化后返回<span style="line-height: 17pt;"> ready </span>消息。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">3. </span><span style="line-height: 17pt;">评测器逐条发送<span style="line-height: 17pt;"> route </span>消息。路由程序为每条请求返回一条<span style="line-height: 17pt;"> decision </span>消息。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">4. </span><span style="line-height: 17pt;">当前评测单元的全部请求处理完毕后，评测器关闭标准输入（<span style="line-height: 17pt;">stdin</span>）。路由程序随后正常退出。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">同一评测单元每次重复运行时，评测器也会启动新进程。程序不得保留上一个评测单元或上一次运行的可变状态。新进程可以重新加载软件包中的权重和只读索引。</span><span style="line-height: 17pt;"></span></p>
+<div style="border: solid #DCE3E8 1.0pt; padding: 0cm 0cm 0cm 0cm; background: #F8FAFB;">
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt; background: #F8FAFB; border: none; padding: 0cm;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">两个评测维度都采用逐条请求、逐条响应的方式。评测器收到当前请求的<span style="line-height: 17pt;"> decision </span>后，才会发送下一条<span style="line-height: 17pt;"> route</span>。因此，路由程序不得等待多条请求后再批量响应，也不得预读未来请求。</span><span style="line-height: 17pt;"></span></span></p>
+</div>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">维度<span style="line-height: 17pt;"> A </span>中，各请求的质量和资源结果互不影响。维度<span style="line-height: 17pt;"> B </span>中，前一条路由决策会影响后续请求的实例状态快照。</span><span style="line-height: 17pt;"></span></p>
+<div style="border: solid #DCE3E8 1.0pt; padding: 0cm 0cm 0cm 0cm; background: #F8FAFB;">
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt; background: #F8FAFB; border: none; padding: 0cm;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">路由程序可以使用<span style="line-height: 17pt;"> Rust</span>、<span style="line-height: 17pt;">Python </span>等能在指定环境中离线运行的语言。程序通过协议接收当前请求和公开配置。程序不得访问评测器内部文件或外部服务。</span><span style="line-height: 17pt;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt; background: #F8FAFB; border: none; padding: 0cm;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">评测器应能使用交付件中的启动入口、依赖和权重，重复启动并离线运行路由程序。</span><span style="line-height: 17pt;"></span></span></p>
+</div>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">主办方在比赛开始前公布运行限制，包括启动超时、退出超时、单条请求超时，以及<span style="line-height: 17pt;"> CPU</span>、内存、线程数和输出大小限制。评测器在<span style="line-height: 17pt;"> init.limits </span>中传入对应的限制参数。正式评测期间保持这些限制不变。</span><span style="line-height: 17pt;"></span></p>
+<h3 style="margin-top: 0cm;"><span class="None"><span style="font-weight: normal;">初始化握手</span></span><span class="None"><span style="font-size: 13.5pt; line-height: 144%; font-family: '微软雅黑',sans-serif;"></span></span></h3>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">评测器先发送<span style="line-height: 17pt;"> init </span>消息，其中包含协议版本、<span style="line-height: 17pt;">run_id</span>、<span style="line-height: 17pt;">track</span>、<span style="line-height: 17pt;">seed</span>、实例目录、<span style="line-height: 17pt;">profiles </span>和<span style="line-height: 17pt;"> limits</span>。</span></span><span class="None" style="line-height: 17pt;"><span style="font-family: 宋体;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt; page-break-after: avoid;"><span style="line-height: 17pt;">路由程序完成初始化后，返回以下<span style="line-height: 17pt;"> ready </span>消息：</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">{"type":"ready","protocol_version":"1.0","run_id":"demo-a"}</span><span style="line-height: 11.5pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">随后，评测器发送<span style="line-height: 17pt;"> route</span>，路由程序返回<span style="line-height: 17pt;"> decision</span>。双方重复此过程，直到评测器关闭<span style="line-height: 17pt;"> stdin</span>。</span><span style="line-height: 17pt;"></span></p>
+<h3 style="margin-top: 0cm;"><span class="None"><span style="font-weight: normal;">本地<span> HTTP </span>调试接口</span></span><span class="None"><span style="font-size: 13.5pt; line-height: 144%; font-family: '微软雅黑',sans-serif;"></span></span></h3>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">参赛者可以使用<span style="line-height: 17pt;"> HTTP </span>封装接口进行本地调试。提交的软件包仍须提供<span style="line-height: 17pt;"> JSONL </span>入口。正式评测只调用<span style="line-height: 17pt;"> JSONL </span>入口。</span></span><span class="None" style="line-height: 17pt;"><span style="font-family: 宋体;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">协议结构和异常处理规则见本节及附录。主办方在比赛开始前发布<span style="line-height: 17pt;"> JSON Schema</span>、参考路由程序、协议自检工具和开发用模拟器。</span></span><span class="None" style="line-height: 17pt;"><span style="font-size: 9.5pt; color: #5e6b78;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">开发包与正式评测使用相同版本的协议和模拟器。测试请求、请求轨迹和实例状态可以不同，但字段含义和处理规则保持一致。</span><span style="line-height: 17pt;"></span></p>
+<h3><span class="None"><span style="font-weight: normal;">请求与响应字段</span></span><span class="None"><span style="font-size: 13.5pt; line-height: 144%; font-family: '微软雅黑',sans-serif;"></span></span></h3>
+<h4><span class="None"><span style="font-weight: normal; font-style: normal;">两个维度共用的消息字段</span><span></span></span></h4>
+<table class="TableNormal data-preserve-origin-style" border="1" cellspacing="0" cellpadding="0" style="margin-left: 5.4pt; background: #4F81BD; border-collapse: collapse; border: 1px solid transparent; width: 100%;"><colgroup><col style="width: 37.1841%;"><col style="width: 10.8303%;"><col style="width: 51.9856%;"></colgroup>
+<thead>
+<tr style="page-break-inside: avoid; height: 12.15pt;">
+<td valign="top" style="border: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'SimSong Bold',serif; color: #314452;">字段</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border: solid black 1.0pt; border-left: none; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'SimSong Bold',serif; color: #314452;">方向</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border: solid black 1.0pt; border-left: none; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'SimSong Bold',serif; color: #314452;">类型与说明</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+</thead>
+<tbody>
+<tr style="page-break-inside: avoid; height: 26.95pt;">
+<td valign="top" style="border: solid black 1.0pt; border-top: none; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'Cambria',serif;">type</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt;">输入</span></span><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'Cambria',serif;">/</span></span><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt;">输出</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt;">输入为<span style="line-height: 13pt;"> "route"</span>。输出为<span style="line-height: 13pt;"> "decision"</span>。</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid; height: 26.95pt;">
+<td valign="top" style="border: solid black 1.0pt; border-top: none; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'Cambria',serif;">seq</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt;">输入</span></span><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'Cambria',serif;">/</span></span><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt;">输出</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt;">非负整数。每次运行从<span style="line-height: 13pt;"> 0 </span>开始连续递增。响应须返回相同的值。</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid; height: 26.95pt;">
+<td valign="top" style="border: solid black 1.0pt; border-top: none; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'Cambria',serif;">request_id</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt;">输入</span></span><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'Cambria',serif;">/</span></span><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt;">输出</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt;">非空字符串，在当前运行中唯一。响应须返回相同的值。</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid; height: 13.95pt;">
+<td valign="top" style="border: solid black 1.0pt; border-top: none; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'Cambria',serif;">query</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt;">输入</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt;">维度<span style="line-height: 13pt;"> A </span>为非空字符串。维度<span style="line-height: 13pt;"> B </span>固定为<span style="line-height: 13pt;"> null</span>。</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid; height: 26.95pt;">
+<td valign="top" style="border: solid black 1.0pt; border-top: none; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'Cambria',serif;">task</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt;">输入</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt;">维度<span style="line-height: 13pt;"> A </span>为公开任务标签或<span style="line-height: 13pt;"> null</span>，标签范围须在赛前公布。维度<span style="line-height: 13pt;"> B </span>固定为<span style="line-height: 13pt;"> null</span>。</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid; height: 13.95pt;">
+<td valign="top" style="border: solid black 1.0pt; border-top: none; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'Cambria',serif;">runtime_context.track</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt;">输入</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt;">取值为<span style="line-height: 13pt;"> A </span>或<span style="line-height: 13pt;"> B</span>，须与<span style="line-height: 13pt;"> init.track </span>相同。</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid; height: 26.95pt;">
+<td valign="top" style="border: solid black 1.0pt; border-top: none; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'Cambria',serif;">instance_id</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt;">输出</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt;">非空字符串，须对应实例目录中的目标实例。维度<span style="line-height: 13pt;"> B </span>还要求该实例的<span style="line-height: 13pt;"> available </span>为<span style="line-height: 13pt;"> true</span>。</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">表中的所有字段均须提供。允许为空的字段也不能省略，应将值设为<span style="line-height: 17pt;"> null</span>。</span></span><span class="None" style="line-height: 17pt;"><span style="font-size: 9.5pt; font-family: '微软雅黑',sans-serif; color: #5e6b78;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">维度<span style="line-height: 17pt;"> A </span>的<span style="line-height: 17pt;"> query </span>必须是非空字符串。<span style="line-height: 17pt;">task </span>是公开任务标签或<span style="line-height: 17pt;"> null</span>。主办方在比赛开始前统一说明是否提供<span style="line-height: 17pt;"> task </span>标签。标签不包含隐藏难度或答案。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">维度<span style="line-height: 17pt;"> B </span>不提供请求原文。<span style="line-height: 17pt;">query </span>和<span style="line-height: 17pt;"> task </span>固定为<span style="line-height: 17pt;"> null</span>。</span><span style="line-height: 17pt;"></span></p>
+<h4><span class="None"><span style="font-weight: normal; font-style: normal;">维度</span></span><span class="None"><span style="font-family: 'Calibri',sans-serif;"> B </span></span><span class="None"><span style="font-weight: normal; font-style: normal;">附加输入字段</span></span><span class="None"><span style="font-family: '微软雅黑',sans-serif;"></span></span></h4>
+<table class="TableNormal data-preserve-origin-style" border="1" cellspacing="0" cellpadding="0" style="margin-left: 5.4pt; background: #4F81BD; border-collapse: collapse; border: 1px solid transparent; width: 100%;"><colgroup><col style="width: 37.1841%;"><col style="width: 10.8303%;"><col style="width: 51.9856%;"></colgroup>
+<thead>
+<tr style="page-break-inside: avoid; height: 12.15pt;">
+<td valign="top" style="border: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'SimSong Bold',serif; color: #314452;">字段</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border: solid black 1.0pt; border-left: none; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'SimSong Bold',serif; color: #314452;">方向</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border: solid black 1.0pt; border-left: none; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'SimSong Bold',serif; color: #314452;">类型与说明</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+</thead>
+<tbody>
+<tr style="page-break-inside: avoid; height: 13.95pt;">
+<td valign="top" style="border: solid black 1.0pt; border-top: none; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'Cambria',serif;">runtime_context.arrival_ms</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt;">输入</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt;">有限非负数，表示请求到达的模拟时间，单位为毫秒。输入按该值非递减排列。同一时刻的请求按<span style="line-height: 13pt;"> seq </span>排序。</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid; height: 13.95pt;">
+<td valign="top" style="border: solid black 1.0pt; border-top: none; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'Cambria',serif;">runtime_context.deadline_ms</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt;">输入</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt;">有限正数，表示从<span style="line-height: 13pt;"> arrival_ms </span>起允许的完成时长，单位为毫秒。</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid; height: 26.95pt;">
+<td valign="top" style="border: solid black 1.0pt; border-top: none; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'Cambria',serif;">runtime_context.prefix_group</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt;">输入</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt;">字符串或<span style="line-height: 13pt;"> null</span>。相同的非空值表示完整的可复用前缀相同。该字段不能表示所有部分前缀重叠关系。</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid; height: 26.95pt;">
+<td valign="top" style="border: solid black 1.0pt; border-top: none; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'Cambria',serif;">runtime_context.eligible_prefix_tokens</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt;">输入</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt;">非负整数，且为<span style="line-height: 13pt;"> 512 </span>的倍数，不大于<span style="line-height: 13pt;"> input_tokens</span>。主办方根据请求轨迹预先确定该值。路由决策和缓存状态不会改变该值。</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid; height: 13.95pt;">
+<td valign="top" style="border: solid black 1.0pt; border-top: none; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'Cambria',serif;">runtime_context.input_tokens</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt;">输入</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt;">非负整数，表示完整输入的<span style="line-height: 13pt;"> token </span>数。</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid; height: 25.9pt;">
+<td valign="top" style="border: solid black 1.0pt; border-top: none; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'Cambria',serif;">runtime_context.expected_output_tokens</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt;">输入</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt;">非负整数，表示已确定的模拟输出<span style="line-height: 13pt;"> token </span>数。</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid; height: 13.95pt;">
+<td valign="top" style="border: solid black 1.0pt; border-top: none; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'Cambria',serif;">runtime_context.instance_snapshot</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt;">输入</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td valign="top" style="border-top: none; border-left: none; border-bottom: solid black 1.0pt; border-right: solid black 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt;">以<span style="line-height: 13pt;"> instance_id </span>为键的对象。每个实例的状态字段见附录。</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">上述字段均位于<span style="line-height: 17pt;"> runtime_context </span>对象中。<span style="line-height: 17pt;">instance_snapshot </span>以实例<span style="line-height: 17pt;"> ID </span>为键，其键集合须与<span style="line-height: 17pt;"> init.instances </span>中的实例<span style="line-height: 17pt;"> ID </span>集合一致。各实例的状态字段见附录。快照只反映路由决策时的状态，模拟器会在请求开始执行时重新计算实际缓存命中量。</span></span><span class="None" style="line-height: 17pt;"><span style="font-size: 9.5pt; font-family: '微软雅黑',sans-serif; color: #5e6b78;"></span></span></p>
+<div style="border: none; border-left: solid #A85A00 3.0pt; padding: 31.0pt 31.0pt 31.0pt 6.0pt; background: #FFF1DF;">
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt; page-break-after: avoid; background: #FFF1DF; border: none; padding: 0cm;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">如果路由程序出现以下任一错误，评测器将当前评测单元记为<span style="line-height: 17pt;"> 0 </span>分，并终止该进程：</span></span><span class="None" style="line-height: 17pt;"><span style="font-family: 宋体;"></span></span></p>
+</div>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">• 输出不是合法<span style="line-height: 17pt;"> JSON</span>，或输出超过规定长度。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">• 输出缺少必填字段，或字段类型错误。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">•<span style="line-height: 17pt;"> seq </span>或<span style="line-height: 17pt;"> request_id </span>与当前请求不匹配。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">• 目标实例不存在，或当前不能接收请求。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">• 程序重复输出、响应超时或异常退出。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">评测器继续运行其他评测单元。该规则要求协议有效率达到<span style="line-height: 17pt;"> 100%</span>，防止程序通过丢弃请求降低后续负载。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">如果错误来自官方输入、评测平台或评测器，主办方应先修复错误，再重新运行受影响的评测单元。这类错误不计入参赛程序的成绩。协议自检工具应覆盖上述异常情况。</span><span style="line-height: 17pt;"></span></p>
+<h3><span class="None"><span style="font-size: 13.5pt; line-height: 144%; font-family: '微软雅黑',sans-serif;">评分公式</span></span></h3>
+<div style="border: none; border-left: solid #A85A00 3.0pt; padding: 31.0pt 31.0pt 31.0pt 6.0pt; background: #FFF1DF;">
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt; background: #FFF1DF; border: none; padding: 0cm;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">维度<span style="line-height: 17pt;"> A </span>按测试组计算质量、模型成本和路由决策时延。测试组满足质量门槛且协议有效时，评测器按固定权重计算组分数。</span><span style="line-height: 17pt;"></span></span></p>
+</div>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">维度<span style="line-height: 17pt;"> B </span>比较同一模型多个实例的缓存复用、资源成本和系统时延。回答质量不参与维度<span style="line-height: 17pt;"> B </span>的计分，也不作为门槛。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">评测器分别对<span style="line-height: 17pt;"> A </span>测试组和<span style="line-height: 17pt;"> B </span>场景的最终分数取等权平均，得到两个维度的分数。这种按组或场景等权计算的方式称为“宏平均”。最后，评测器将两个维度的分数与工程评审分数加权相加。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">各单项分数归一化到<span style="line-height: 17pt;"> [0,1]</span>。<span style="line-height: 17pt;">clip(x)=min(1,max(0,x)) </span>用于将结果限制在该范围内。</span></span><span class="None" style="line-height: 17pt;"><span style="font-family: '微软雅黑',sans-serif;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">维度<span style="line-height: 17pt;"> A </span>的权重为：质量<span style="line-height: 17pt;"> 55%</span>、模型成本<span style="line-height: 17pt;"> 30%</span>、路由决策时延<span style="line-height: 17pt;"> 15%</span>。维度<span style="line-height: 17pt;"> B </span>的权重为：资源成本<span style="line-height: 17pt;"> 20%</span>、缓存命中率<span style="line-height: 17pt;"> 25%</span>、按时完成率（<span style="line-height: 17pt;">SLO</span>）<span style="line-height: 17pt;">25%</span>、端到端时延<span style="line-height: 17pt;"> 20%</span>、路由决策时延<span style="line-height: 17pt;"> 10%</span>。成本或时延越低，相应单项得分越高。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">主办方在比赛开始前确定并冻结权重、分组、宏平均规则、门槛、参考方案和归一化方法。</span><span style="line-height: 17pt;"></span></p>
+<h4><span class="None"><span style="font-family: '微软雅黑',sans-serif;">维度 A 评分</span></span><span class="None"><span style="font-family: '微软雅黑',sans-serif;"></span></span></h4>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt; page-break-after: avoid;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">维度<span style="line-height: 17pt;"> A </span>对一次提交的路由程序进行加权评分，不要求参赛者提供<span style="line-height: 17pt;"> AIQ </span>或<span style="line-height: 17pt;"> nAUC </span>曲线。</span></span><span class="None" style="line-height: 17pt;"><span style="font-family: '微软雅黑',sans-serif;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">q_i </span><span style="line-height: 17pt;">表示请求<span style="line-height: 17pt;"> i </span>的质量分数。主办方按各任务的评价指标，预先将质量结果映射到<span style="line-height: 17pt;"> [0,1]</span>。如果任务只判断成功或失败，则<span style="line-height: 17pt;"> q_i</span>∈<span style="line-height: 17pt;">{0,1}</span>。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">主办方预先确定各任务的映射方法、测试组和样本量。评测器不直接平均量纲不同的原始质量分数。</span><span style="line-height: 17pt;"></span></p>
+<table class="TableNormal data-preserve-origin-style" border="1" cellspacing="0" cellpadding="0" style="border-collapse: collapse; border: 1px solid transparent; width: 100%;"><colgroup><col style="width: 50.0000%;"><col style="width: 50.0000%;"></colgroup>
+<thead>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="background: #D9EAF7; padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><b><span style="font-size: 9.0pt; line-height: 150%; font-family: 'Cambria',serif;">公式</span></b><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="background: #D9EAF7; padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">变量含义与计算方法</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+</thead>
+<tbody>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">Q_A,g = mean_i(q_i)</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">Q_A,g </span><span style="font-size: 9.5pt;">是<span style="line-height: 13pt;"> A </span>测试组<span style="line-height: 13pt;"> g </span>的平均质量。<span style="line-height: 13pt;">q_i </span>是请求<span style="line-height: 13pt;"> i </span>的官方质量分数，范围为<span style="line-height: 13pt;"> [0,1]</span>。<span style="line-height: 13pt;">mean_i </span>表示对组内全部请求取算术平均。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">C_A,g = mean_i(model_cost_i)</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">C_A,g </span><span style="font-size: 9.5pt;">是<span style="line-height: 13pt;"> A </span>测试组的平均模型成本。<span style="line-height: 13pt;">model_cost_i </span>是请求<span style="line-height: 13pt;"> i </span>所选模型的模拟成本。评测器使用已冻结的<span style="line-height: 13pt;"> token </span>记录和单价计算该成本。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">T_A,g = P95(router_ms_i)</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">T_A,g </span><span style="font-size: 9.5pt;">是<span style="line-height: 13pt;"> A </span>测试组路由决策时延的第<span style="line-height: 13pt;"> 95 </span>百分位数。<span style="line-height: 13pt;">router_ms_i </span>从评测器开始写入已序列化的<span style="line-height: 13pt;"> route </span>行起算，到收到完整<span style="line-height: 13pt;"> decision </span>行结束，单位为毫秒。<span style="line-height: 13pt;">P95 </span>使用<span style="line-height: 13pt;"> nearest-rank </span>方法。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">q_A,g = clip((Q_A,g - Q_low,g) / (Q_high,g - Q_low,g))</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">q_A,g </span><span style="font-size: 9.5pt;">是归一化后的质量得分。<span style="line-height: 13pt;">Q_low,g </span>和<span style="line-height: 13pt;"> Q_high,g </span>分别是主办方预先确定并冻结的质量下限和上限。质量越高，得分越高。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">c_A,g = clip((C_high,g - C_A,g) / (C_high,g - C_low,g))</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">c_A,g </span><span style="font-size: 9.5pt;">是归一化后的模型成本得分。<span style="line-height: 13pt;">C_low,g </span>和<span style="line-height: 13pt;"> C_high,g </span>分别是成本下限和上限。成本越低，得分越高。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">t_A,g = clip((T_slow,g - T_A,g) / (T_slow,g - T_fast,g))</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">t_A,g </span><span style="font-size: 9.5pt;">是归一化后的路由决策时延得分。<span style="line-height: 13pt;">T_fast,g </span>和<span style="line-height: 13pt;"> T_slow,g </span>分别是主办方在正式环境中标定的快、慢参考时延。不高于快参考值时得<span style="line-height: 13pt;"> 1 </span>分，不低于慢参考值时得<span style="line-height: 13pt;"> 0 </span>分。两者之间按线性比例计分。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">G_A,g = P_g </span><span style="font-size: 9.0pt; line-height: 150%; font-family: 'Cambria',serif;">×</span><span style="font-size: 9.0pt; line-height: 150%;"> I(Q_A,g &gt;= Q_min,g)</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">G_A,g </span><span style="font-size: 9.5pt;">表示本次运行是否具备计分资格。<span style="line-height: 13pt;">P_g </span>为协议有效标记，无协议错误时为<span style="line-height: 13pt;"> 1</span>，否则为<span style="line-height: 13pt;"> 0</span>。<span style="line-height: 13pt;">Q_min,g </span>是质量门槛。<span style="line-height: 13pt;">I(</span>·<span style="line-height: 13pt;">) </span>为指示函数，条件成立时取<span style="line-height: 13pt;"> 1</span>，否则取<span style="line-height: 13pt;"> 0</span>。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">S_A,g = 100 </span><span style="font-size: 9.0pt; line-height: 150%; font-family: 'Cambria',serif;">×</span><span style="font-size: 9.0pt; line-height: 150%;"> G_A,g </span><span style="font-size: 9.0pt; line-height: 150%; font-family: 'Cambria',serif;">×</span><span style="font-size: 9.0pt; line-height: 150%;"> (0.55 </span><span style="font-size: 9.0pt; line-height: 150%; font-family: 'Cambria',serif;">×</span><span style="font-size: 9.0pt; line-height: 150%;"> q_A,g + 0.30 </span><span style="font-size: 9.0pt; line-height: 150%; font-family: 'Cambria',serif;">×</span><span style="font-size: 9.0pt; line-height: 150%;"> c_A,g + 0.15 </span><span style="font-size: 9.0pt; line-height: 150%; font-family: 'Cambria',serif;">×</span><span style="font-size: 9.0pt; line-height: 150%;"> t_A,g)</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">S_A,g </span><span style="font-size: 9.5pt;">是<span style="line-height: 13pt;"> A </span>测试组单次运行的分数，满分为<span style="line-height: 13pt;"> 100</span>。质量、模型成本和路由决策时延分别占<span style="line-height: 13pt;"> 55%</span>、<span style="line-height: 13pt;">30% </span>和<span style="line-height: 13pt;"> 15%</span>。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">group_score_A,g = median_r(S_A,g^(r)),<span style="line-height: 150%;">&nbsp; </span>r = 1,2,3</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">group_score_A,g </span><span style="font-size: 9.5pt;">是<span style="line-height: 13pt;"> A </span>测试组的最终分数。三次独立启动的运行均无协议错误时，按左侧公式取三次分数的中位数。如果任一次运行出现协议错误，该组最终得<span style="line-height: 13pt;"> 0 </span>分。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">S_A = mean_g(group_score_A,g)</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">S_A </span><span style="font-size: 9.5pt;">是维度<span style="line-height: 13pt;"> A </span>的自动评测分数。评测器对所有预定义<span style="line-height: 13pt;"> A </span>测试组的最终分数取等权平均，不按请求数量加权。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">如果同一评测单元的三次运行都没有协议错误，<span style="line-height: 17pt;">group_score </span>取三次组分数的中位数。如果任一次运行出现协议错误，<span style="line-height: 17pt;">group_score </span>为<span style="line-height: 17pt;"> 0</span>。</span></span><span class="None" style="line-height: 17pt;"><span style="font-family: '微软雅黑',sans-serif;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">g </span><span style="line-height: 17pt;">表示预定义的<span style="line-height: 17pt;"> A </span>测试组。<span style="line-height: 17pt;">P_g </span>表示单次运行的协议有效性：整组无协议错误时为<span style="line-height: 17pt;"> 1</span>，有协议错误时为<span style="line-height: 17pt;"> 0</span>。<span style="line-height: 17pt;">Q_min </span>表示最低质量要求。质量门槛用于排除质量不合格的方案，满足门槛的方案仍按加权分数排序。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">每个归一化区间的上限须大于下限。主办方应使用参考方案检查区间，避免大量方案的分数都被<span style="line-height: 17pt;"> clip </span>函数限制为<span style="line-height: 17pt;"> 0 </span>或<span style="line-height: 17pt;"> 1</span>。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">主办方根据已冻结的离线参考方案确定<span style="line-height: 17pt;"> Q_low/Q_high </span>和<span style="line-height: 17pt;"> C_low/C_high</span>。<span style="line-height: 17pt;">T_fast/T_slow </span>是参考路由程序在同一硬件上的快、慢时延基准值，后文简称“时延锚点”。维度<span style="line-height: 17pt;"> B </span>的<span style="line-height: 17pt;"> E_fast/E_slow </span>则通过固定模拟器和服务参数标定。</span><span style="line-height: 17pt;"></span></p>
+<h4><span class="None"><span style="font-weight: normal; font-style: normal;">维度<span> B </span>评分</span></span><span class="None"><span style="font-family: '微软雅黑',sans-serif;"></span></span></h4>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">维度<span style="line-height: 17pt;"> B </span>的回答质量不随实例选择变化，因此不设置回答质量门槛。</span></span><span class="None" style="line-height: 17pt;"><span style="font-family: '微软雅黑',sans-serif;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">缓存得分只使用按<span style="line-height: 17pt;"> token </span>加权的命中率<span style="line-height: 17pt;"> H</span>。重算量用于解释结果，不单独加权计分。这可以避免对同一次输入预填充（<span style="line-height: 17pt;">prefill</span>）的缓存收益重复计分。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">资源成本、按时完成率和端到端时延分别反映不同结果。这些指标虽然与缓存复用相关，仍按已公布的权重计分。</span><span style="line-height: 17pt;"></span></p>
+<table class="TableNormal data-preserve-origin-style" border="1" cellspacing="0" cellpadding="0" style="border-collapse: collapse; border: 1px solid transparent; width: 100%;"><colgroup><col style="width: 50.0000%;"><col style="width: 50.0000%;"></colgroup>
+<thead>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="background: #D9EAF7; padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><b><span style="font-size: 9.0pt; line-height: 150%; font-family: 'Cambria',serif;">公式</span></b><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="background: #D9EAF7; padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">变量含义与计算方法</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+</thead>
+<tbody>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">C_B,g = (total_compute_cost + total_KV_cost) / N_g</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">C_B,g </span><span style="font-size: 9.5pt;">是<span style="line-height: 13pt;"> B </span>场景<span style="line-height: 13pt;"> g </span>的平均资源成本。<span style="line-height: 13pt;">total_compute_cost </span>是重算输入<span style="line-height: 13pt;"> token </span>和生成输出<span style="line-height: 13pt;"> token </span>的计算成本。<span style="line-height: 13pt;">total_KV_cost </span>是缓存驻留成本。<span style="line-height: 13pt;">N_g </span>是场景中的请求总数。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">H_B,g = sum_i(cache_hit_i) / sum_i(eligible_prefix_i)</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">H_B,g </span><span style="font-size: 9.5pt;">是按<span style="line-height: 13pt;"> token </span>加权的缓存命中率。<span style="line-height: 13pt;">cache_hit_i </span>是请求<span style="line-height: 13pt;"> i </span>开始执行时实际命中的前缀<span style="line-height: 13pt;"> token </span>数。<span style="line-height: 13pt;">eligible_prefix_i </span>对应输入字段<span style="line-height: 13pt;"> eligible_prefix_tokens</span>，表示请求<span style="line-height: 13pt;"> i </span>可复用的前缀<span style="line-height: 13pt;"> token </span>数。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">c_B,g = clip((C_high,g - C_B,g) / (C_high,g - C_low,g))</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">c_B,g </span><span style="font-size: 9.5pt;">是归一化后的资源成本得分。<span style="line-height: 13pt;">C_low,g </span>和<span style="line-height: 13pt;"> C_high,g </span>分别是主办方预先确定并冻结的成本下限和上限。成本越低，得分越高。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">k_B,g = H_B,g</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">k_B,g </span><span style="font-size: 9.5pt;">是缓存命中得分，等于按<span style="line-height: 13pt;"> token </span>加权的缓存命中率<span style="line-height: 13pt;"> H_B,g</span>。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">E_B,g = P95(e2e_ms_i)</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">E_B,g </span><span style="font-size: 9.5pt;">是<span style="line-height: 13pt;"> B </span>场景端到端时延的第<span style="line-height: 13pt;"> 95 </span>百分位数。<span style="line-height: 13pt;">e2e_ms_i </span>从请求<span style="line-height: 13pt;"> i </span>的<span style="line-height: 13pt;"> arrival_ms </span>起算，到模拟完成时结束。它包含排队、故障暂停和服务时间，不包含路由程序的实际耗时。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">e_B,g = clip((E_slow,g - E_B,g) / (E_slow,g - E_fast,g))</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">e_B,g </span><span style="font-size: 9.5pt;">是归一化后的端到端时延得分。主办方使用固定模拟器和服务参数标定<span style="line-height: 13pt;"> E_fast,g </span>与<span style="line-height: 13pt;"> E_slow,g</span>，分别作为快、慢参考时延。时延越低，得分越高。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">SLO_B,g = mean_i(I(e2e_ms_i &lt;= deadline_ms_i))</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">SLO_B,g </span><span style="font-size: 9.5pt;">是按时完成率。<span style="line-height: 13pt;">deadline_ms_i </span>是请求<span style="line-height: 13pt;"> i </span>从到达时起允许的完成时长。逾期请求仍继续执行，并计入其他指标。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">T_B,g = P95(router_ms_i)</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">T_B,g </span><span style="font-size: 9.5pt;">是<span style="line-height: 13pt;"> B </span>场景路由决策时延的第<span style="line-height: 13pt;"> 95 </span>百分位数。<span style="line-height: 13pt;">router_ms_i </span>的计时起止点和测量方法与维度<span style="line-height: 13pt;"> A </span>相同。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">t_B,g = clip((T_slow,g - T_B,g) / (T_slow,g - T_fast,g))</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">t_B,g </span><span style="font-size: 9.5pt;">是归一化后的路由决策时延得分。<span style="line-height: 13pt;">T_fast,g </span>和<span style="line-height: 13pt;"> T_slow,g </span>分别是快、慢参考时延。时延越低，得分越高。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">S_B,g = 100 </span><span style="font-size: 9.0pt; line-height: 150%; font-family: 'Cambria',serif;">×</span><span style="font-size: 9.0pt; line-height: 150%;"> P_g </span><span style="font-size: 9.0pt; line-height: 150%; font-family: 'Cambria',serif;">×</span><span style="font-size: 9.0pt; line-height: 150%;"> (0.20 </span><span style="font-size: 9.0pt; line-height: 150%; font-family: 'Cambria',serif;">×</span><span style="font-size: 9.0pt; line-height: 150%;"> c_B,g + 0.25 </span><span style="font-size: 9.0pt; line-height: 150%; font-family: 'Cambria',serif;">×</span><span style="font-size: 9.0pt; line-height: 150%;"> k_B,g + 0.25 </span><span style="font-size: 9.0pt; line-height: 150%; font-family: 'Cambria',serif;">×</span><span style="font-size: 9.0pt; line-height: 150%;"> SLO_B,g + 0.20 </span><span style="font-size: 9.0pt; line-height: 150%; font-family: 'Cambria',serif;">×</span><span style="font-size: 9.0pt; line-height: 150%;"> e_B,g + 0.10 </span><span style="font-size: 9.0pt; line-height: 150%; font-family: 'Cambria',serif;">×</span><span style="font-size: 9.0pt; line-height: 150%;"> t_B,g)</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">S_B,g </span><span style="font-size: 9.5pt;">是<span style="line-height: 13pt;"> B </span>场景单次运行的分数，满分为<span style="line-height: 13pt;"> 100</span>。资源成本、缓存命中率、按时完成率、端到端时延和路由决策时延分别占<span style="line-height: 13pt;"> 20%</span>、<span style="line-height: 13pt;">25%</span>、<span style="line-height: 13pt;">25%</span>、<span style="line-height: 13pt;">20% </span>和<span style="line-height: 13pt;"> 10%</span>。<span style="line-height: 13pt;">P_g </span>为协议有效标记。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">group_score_B,g = median_r(S_B,g^(r)),<span style="line-height: 150%;">&nbsp; </span>r = 1,2,3</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">group_score_B,g </span><span style="font-size: 9.5pt;">是<span style="line-height: 13pt;"> B </span>场景的最终分数。三次独立启动的运行均无协议错误时，按左侧公式取中位数。如果任一次运行出现协议错误，该场景最终得<span style="line-height: 13pt;"> 0 </span>分。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">S_B = mean_g(group_score_B,g)</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">S_B </span><span style="font-size: 9.5pt;">是维度<span style="line-height: 13pt;"> B </span>的自动评测分数。评测器对所有预定义<span style="line-height: 13pt;"> B </span>场景的最终分数取等权平均。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">维度<span style="line-height: 17pt;"> B </span>使用与维度<span style="line-height: 17pt;"> A </span>相同的三次运行汇总规则。<span style="line-height: 17pt;">g </span>表示一个完整、独立的<span style="line-height: 17pt;"> B </span>场景。模拟器在场景运行期间不重置队列或缓存。</span></span><span class="None" style="line-height: 17pt;"><span style="font-family: '微软雅黑',sans-serif;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">C_B </span><span style="line-height: 17pt;">等于整个场景的计算成本与缓存驻留成本之和，再除以请求总数。缓存驻留成本是缓存占用存储空间所产生的成本，具体计算方法见附录。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">H </span><span style="line-height: 17pt;">的分母是场景中所有请求的<span style="line-height: 17pt;"> eligible_prefix_tokens </span>之和。每个正式计分的<span style="line-height: 17pt;"> B </span>场景都须使该分母大于<span style="line-height: 17pt;"> 0</span>。完全没有可复用前缀的场景仅用于诊断。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">SLO_B,g </span><span style="line-height: 17pt;">表示按时完成的请求数占全部请求数的比例。完成时限只用于判断请求是否按时完成，模拟器不会取消逾期请求。模拟器持续运行到全部请求完成，并计入所有请求的资源用量。</span><span style="line-height: 17pt;"></span></p>
+<h4><span class="None"><span style="font-family: 宋体; font-weight: normal; font-style: normal;">综合排名</span></span><span class="None"><span style="font-weight: normal; font-style: normal;"></span></span></h4>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="font-family: 微软雅黑;">两个自动评测维度合计占总分的 80%，用于评价路由效果。工程评审占 20%，用于评价方案的可复现性、实验依据和设计说明。</span></span><span class="None" style="line-height: 17pt;"><span style="font-family: '微软雅黑',sans-serif;"></span></span></p>
+<table class="TableNormal data-preserve-origin-style" border="1" cellspacing="0" cellpadding="0" style="border-collapse: collapse; border: 1px solid transparent; width: 100%;"><colgroup><col style="width: 50.0000%;"><col style="width: 50.0000%;"></colgroup>
+<thead>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="background: #D9EAF7; padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><b><span style="font-size: 9.0pt; line-height: 150%; font-family: 'Cambria',serif;">公式</span></b><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="background: #D9EAF7; padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">变量含义与计算方法</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+</thead>
+<tbody>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">S_E = 100 </span><span style="font-size: 9.0pt; line-height: 150%; font-family: 'Cambria',serif;">×</span><span style="font-size: 9.0pt; line-height: 150%;"> (0.40 </span><span style="font-size: 9.0pt; line-height: 150%; font-family: 'Cambria',serif;">×</span><span style="font-size: 9.0pt; line-height: 150%;"> reproducibility + 0.30 </span><span style="font-size: 9.0pt; line-height: 150%; font-family: 'Cambria',serif;">×</span><span style="font-size: 9.0pt; line-height: 150%;"> ablation_evidence + 0.30 </span><span style="font-size: 9.0pt; line-height: 150%; font-family: 'Cambria',serif;">×</span><span style="font-size: 9.0pt; line-height: 150%;"> design_explanation)</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">S_E </span><span style="font-size: 9.5pt;">是工程评审分数，满分为<span style="line-height: 13pt;"> 100</span>。<span style="line-height: 13pt;">reproducibility</span>、<span style="line-height: 13pt;">ablation_evidence </span>和<span style="line-height: 13pt;"> design_explanation </span>分别表示可复现性、消融证据和设计解释得分。三个评审项按预先公布的规则取<span style="line-height: 13pt;"> [0,1] </span>范围内的值。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">S_total = 0.40 </span><span style="font-size: 9.0pt; line-height: 150%; font-family: 'Cambria',serif;">×</span><span style="font-size: 9.0pt; line-height: 150%;"> S_A + 0.40 </span><span style="font-size: 9.0pt; line-height: 150%; font-family: 'Cambria',serif;">×</span><span style="font-size: 9.0pt; line-height: 150%;"> S_B + 0.20 </span><span style="font-size: 9.0pt; line-height: 150%; font-family: 'Cambria',serif;">×</span><span style="font-size: 9.0pt; line-height: 150%;"> S_E</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">S_total </span><span style="font-size: 9.5pt;">是最终总分，满分为<span style="line-height: 13pt;"> 100</span>。<span style="line-height: 13pt;">S_A</span>、<span style="line-height: 13pt;">S_B </span>和<span style="line-height: 13pt;"> S_E </span>分别是维度<span style="line-height: 13pt;"> A</span>、维度<span style="line-height: 13pt;"> B </span>和工程评审的分数。三部分分别占<span style="line-height: 13pt;"> 40%</span>、<span style="line-height: 13pt;">40% </span>和<span style="line-height: 13pt;"> 20%</span>。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid;">
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="margin-bottom: 0cm; line-height: 150%;"><span style="font-size: 9.0pt; line-height: 150%;">clip(x) = min(1, max(0, x))</span><span style="line-height: 150%;"></span></p>
+</td>
+<td valign="top" style="padding: 5.5pt 5.5pt 5.5pt 5.5pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span style="font-size: 9.5pt;">clip </span><span style="font-size: 9.5pt;">将归一化结果限制在<span style="line-height: 13pt;"> [0,1]</span>。归一化公式的分母都须大于 <span style="line-height: 13pt;">0</span>。主办方预先公布并冻结参考时延及上下限，不使用参赛队伍结果的最大值或最小值。</span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">总分按<span style="line-height: 17pt;"> S_total=0.40S_A+0.40S_B+0.20S_E </span>计算。工程评审内部的权重为：可复现性<span style="line-height: 17pt;"> 40%</span>、消融证据<span style="line-height: 17pt;"> 30%</span>、设计解释<span style="line-height: 17pt;"> 30%</span>。</span></span><span class="None" style="line-height: 17pt;"><span style="font-family: '微软雅黑',sans-serif;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">如果任一评测单元出现协议错误，或任一<span style="line-height: 17pt;"> A </span>测试组未达到质量门槛，该方案不进入主榜。评测器仍可保留其分项成绩。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">评委按预先公开的统一细则计算<span style="line-height: 17pt;"> S_E</span>。参赛者只需在公开开发集上提供小规模参考方案对比和消融实验，不需要完成完整的<span style="line-height: 17pt;"> AIQ </span>实验。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">两名评委分别对三个工程评审项评分。每项可得<span style="line-height: 17pt;"> 0</span>、<span style="line-height: 17pt;">0.5 </span>或<span style="line-height: 17pt;"> 1 </span>分，按以下标准判断。评委依据提交材料和公开开发集上的实验结果评分，再对两名评委的评分取平均。</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">• 可复现性：程序无法运行，得<span style="line-height: 17pt;"> 0 </span>分。程序可运行，但复现材料不完整，得<span style="line-height: 17pt;"> 0.5 </span>分。第三方能够依据材料完整地离线复现，得<span style="line-height: 17pt;"> 1 </span>分。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">• 消融证据：没有有效对比，得<span style="line-height: 17pt;"> 0 </span>分。有参考方案对比，得<span style="line-height: 17pt;"> 0.5 </span>分。在对比基础上，另有单独检验关键因素作用的消融实验和结果，得<span style="line-height: 17pt;"> 1 </span>分。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">• 设计解释：无法说明策略，得<span style="line-height: 17pt;"> 0 </span>分。能够说明策略和数据，得<span style="line-height: 17pt;"> 0.5 </span>分。在此基础上，还能解释设计取舍和已知限制，得<span style="line-height: 17pt;"> 1 </span>分。</span><span style="line-height: 17pt;"></span></p>
+<h3><span class="None"><span style="font-size: 13.5pt; line-height: 144%; font-family: '微软雅黑',sans-serif;">模型与实例的对应关系</span></span><span class="None"><span></span></span></h3>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">维度<span style="line-height: 17pt;"> A </span>的候选实例可以对应不同模型。维度<span style="line-height: 17pt;"> B </span>同一场景中的所有实例必须具有相同的<span style="line-height: 17pt;"> model_id </span>和<span style="line-height: 17pt;"> model_version</span>。</span><span style="line-height: 17pt;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">评测器通过<span style="line-height: 17pt;"> init </span>提供实例<span style="line-height: 17pt;"> ID</span>、模型对应关系和静态资源参数。路由程序应读取这些配置，不得在代码中写死私有场景的实例<span style="line-height: 17pt;"> ID</span>。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">维度<span style="line-height: 17pt;"> B </span>中，各实例有独立的队列和逻辑缓存。评测器通过实例状态快照提供当前可用性。</span><span style="line-height: 17pt;"></span></p>
+<h3><span class="None"><span style="font-size: 13.5pt; line-height: 144%; font-family: '微软雅黑',sans-serif;">维度 A 处理流程</span><span></span></span></h3>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">评测器发送<span style="line-height: 17pt;"> route</span>（<span style="line-height: 17pt;">query</span>、<span style="line-height: 17pt;">task</span>、<span style="line-height: 17pt;">seq</span>、<span style="line-height: 17pt;">request_id</span>）→ 路由程序返回<span style="line-height: 17pt;"> decision</span>（<span style="line-height: 17pt;">instance_id </span>及请求关联字段）→ 评测器查询已冻结的质量与成本矩阵。</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">评测器根据<span style="line-height: 17pt;"> instance_id </span>找到对应的候选模型，再从已冻结的“请求 × 模型”结果矩阵中读取质量、<span style="line-height: 17pt;">token </span>和成本记录。参赛者无需调用候选模型。</span></span><span style="line-height: 17pt;"></span></p>
+<h3 style="margin-top: 0cm;"><span class="None"><span style="font-size: 13.5pt; line-height: 144%; font-family: '微软雅黑',sans-serif;">输入与输出示例</span></span><span class="None"><span style="color: black;"></span></span></h3>
+<p style="margin-bottom: 6.0pt; line-height: 11.5pt; page-break-after: avoid;"><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">{</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"type": "route",</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"seq": 0,</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"request_id": "q_001",</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"query": "...",</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"task": "math",</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"runtime_context": {</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp;&nbsp;&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"track": "A"</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">}</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">}</span></span><span class="None" style="line-height: 11.5pt;"><span style="color: black;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 11.5pt;"><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">{</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"type": "decision",</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"seq": 0,</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"request_id": "q_001",</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"instance_id": "instance-a0"</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">}</span></span><span class="None" style="line-height: 11.5pt;"><b><span style="font-size: 13.5pt; font-family: '微软雅黑',sans-serif; color: #4f81bd;"></span></b></span></p>
+<h3 style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="font-size: 11.0pt; font-family: 微软雅黑; font-weight: normal;">运行环境</span></span><span class="None" style="line-height: 17pt;"><span style="font-family: 宋体; color: #e4edf2;"></span></span></h3>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">参赛者可以在<span style="line-height: 17pt;"> macOS </span>或<span style="line-height: 17pt;"> Windows </span>上开发并验证软件包。主办方统一在已公布的固定<span style="line-height: 17pt;"> CPU-only </span>环境中进行正式评测和排名。</span></span><span class="None" style="line-height: 17pt;"><span style="font-family: '微软雅黑',sans-serif; color: #1769aa;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">评测主机的总物理内存为<span style="line-height: 17pt;"> 16 GB</span>。<span style="line-height: 17pt;">16 GB </span>不等于路由进程可以使用的内存上限。路由进程的内存上限由<span style="line-height: 17pt;"> memory_mb </span>单独规定。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">主办方在公开运行配置中说明<span style="line-height: 17pt;"> CPU </span>型号和核心数。路由进程的内存上限、线程数、启动超时、请求超时、退出超时和输入输出大小限制同时写入公开配置，并通过<span style="line-height: 17pt;"> init.limits </span>传入程序。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">软件包所需的依赖、本地模型和索引须随包提交，并在规定的资源配额内离线运行。正式评测不使用<span style="line-height: 17pt;"> GPU</span>、候选大模型服务或外部网络。</span><span style="line-height: 17pt;"></span></p>
+<h3 style="margin-top: 0cm;"><span class="None"><span style="font-size: 13.5pt; line-height: 144%; font-family: '微软雅黑',sans-serif;">重点指标</span></span><span class="None"><span></span></span></h3>
+<p style="line-height: 17.0pt; margin: 0cm 18.0pt 6.0pt 0cm;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">质量或成功率<span style="line-height: 17pt;"> Q</span>：主办方按任务指标将结果映射到<span style="line-height: 17pt;"> [0,1]</span>。评测器据此计算<span style="line-height: 17pt;"> Q</span>，并检查<span style="line-height: 17pt;"> Q </span>是否达到最低质量要求。</span><span style="line-height: 17pt;"></span></span></p>
+<p style="line-height: 17.0pt; margin: 0cm 18.0pt 6.0pt 0cm;"><span class="None" style="line-height: 17pt;"><span style="font-family: 微软雅黑; color: #1769aa;">模型</span></span><span class="None" style="line-height: 17pt;"><span style="font-family: 微软雅黑; color: #1769aa;"> token </span></span><span class="None" style="line-height: 17pt;"><span style="font-family: 微软雅黑; color: #1769aa;">成本：成本越低，相应得分越高。</span></span><span class="None" style="line-height: 17pt;"><span style="font-family: '微软雅黑',sans-serif; color: #1769aa;"></span></span></p>
+<p style="line-height: 17.0pt; margin: 0cm 18.0pt 6.0pt 0cm;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">综合指标：评测器在私有测试集上计算质量、模型成本和路由决策时延的加权得分。参赛者无需提供 AIQ 或 nAUC 曲线。</span><span style="line-height: 17pt;"></span></span></p>
+<div style="border: none; border-bottom: solid black 1.0pt; padding: 31.0pt 31.0pt 0cm 31.0pt; margin-left: 0cm; margin-right: 18.0pt;">
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt; border: none; padding: 0cm;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">路由决策时延的第<span style="line-height: 17pt;"> 95 </span>百分位数（<span style="line-height: 17pt;">Router P95</span>）：评测器使用官方快、慢参考时延进行归一化。时延越低，相应得分越高。</span><span style="line-height: 17pt;"></span></span></p>
+</div>
+<h3><span class="None"><span style="font-size: 13.5pt; line-height: 144%; font-family: '微软雅黑',sans-serif;">维度 B 处理流程</span><span></span></span></h3>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">模拟器推进到<span style="line-height: 17pt;"> arrival_ms </span>→ 评测器生成当前实例状态快照 → 路由程序返回目标实例 → 模拟器将请求加入队列并更新任务、缓存状态 → 评测器统计所有请求的成本、时延和按时完成率。</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">维度<span style="line-height: 17pt;"> B </span>使用请求负载信息，<span style="line-height: 17pt;">query </span>和<span style="line-height: 17pt;"> task </span>固定为<span style="line-height: 17pt;"> null</span>。主办方无需为<span style="line-height: 17pt;"> Mooncake </span>请求轨迹补充回答质量标签。</span><span style="line-height: 17pt;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">评测器向路由程序提供当前请求的输出长度，用它表示已知的模拟工作量。这是本题的调度假设，不表示真实业务能够提前知道模型的输出长度。</span><span style="line-height: 17pt;"></span></p>
+<h3 style="margin-top: 0cm;"><span class="None"><span style="font-size: 13.5pt; line-height: 144%; font-family: '微软雅黑',sans-serif;">输入与输出示例</span></span><span></span></h3>
+<p style="margin-bottom: 6.0pt; line-height: 11.5pt;"><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">{"type":"route","seq":0,"request_id":"e_001042",</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp;</span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"query":null,"task":null,</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp;</span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"runtime_context":{"track":"B","arrival_ms":27300,</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"prefix_group":"pg_117","eligible_prefix_tokens":6144,</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"input_tokens":6955,"expected_output_tokens":52,</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"deadline_ms":1200,"instance_snapshot":{</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp;&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"instance-a0":{"available":true,"queue_length":1,</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp;&nbsp;&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"running_remaining_ms":80,"queued_work_ms":200,</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp;&nbsp;&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"cache_used_tokens":8192,"cached_prefix_tokens":4096},</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp;&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"instance-a1":{"available":true,"queue_length":0,</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp;&nbsp;&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"running_remaining_ms":0,"queued_work_ms":0,</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp;&nbsp;&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"cache_used_tokens":0,"cached_prefix_tokens":0}}}}</span></span><span class="None" style="line-height: 11.5pt;"><span style="color: black;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 11.5pt;"><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">{</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"type": "decision",</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"seq": 0,</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"request_id": "e_001042",</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"instance_id": "instance-a0"</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">}</span></span><span class="None" style="line-height: 11.5pt;"><span style="color: black;"></span></span></p>
+<h3 style="margin-top: 0cm;"><span class="None"><span style="font-size: 13.5pt; line-height: 144%; font-family: '微软雅黑',sans-serif;">重点指标</span></span><span class="None"><span></span></span></h3>
+<p style="line-height: 17.0pt; margin: 0cm 18.0pt 6.0pt 0cm;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">协议有效性：所有消息须符合协议要求。回答质量不随同模型实例的选择变化，不计入维度<span style="line-height: 17pt;"> B </span>的成绩。</span><span style="line-height: 17pt;"></span></span></p>
+<p style="line-height: 17.0pt; margin: 0cm 18.0pt 6.0pt 0cm;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">缓存命中率：评测器按可复用前缀的<span style="line-height: 17pt;"> token </span>数加权计算命中率。模拟器在请求开始执行时确定实际命中量。</span></span><span style="line-height: 17pt;"></span></p>
+<div style="border: none; border-bottom: solid #DCE3E8 1.0pt; padding: 31.0pt 31.0pt 0cm 31.0pt; margin-left: 0cm; margin-right: 18.0pt;">
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt; border: none; padding: 0cm;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">资源成本：评测器按统一的模拟单价，将重算输入<span style="line-height: 17pt;"> token</span>、输出<span style="line-height: 17pt;"> token </span>和缓存驻留量<span style="line-height: 17pt;"> GB</span>·<span style="line-height: 17pt;">s </span>换算为成本。重算比例单独报告，不重复加权计分。</span></span><span style="line-height: 17pt;"></span></p>
+</div>
+<div style="border: none; border-left: solid #A85A00 3.0pt; padding: 31.0pt 31.0pt 31.0pt 6.0pt; background: #FFF1DF;">
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt; background: #FFF1DF; border: none; padding: 0cm;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">本题使用逻辑缓存模拟。主办方保留原始或改造后的有序前缀块，用于计算请求可以命中的最长连续前缀。路由程序读取<span style="line-height: 17pt;"> prefix_group </span>和各实例当前可复用的<span style="line-height: 17pt;"> token </span>数，无需还原<span style="line-height: 17pt;"> KV </span>张量。</span><span style="line-height: 17pt;"></span></span></p>
+</div>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">模拟规则见附录。开发与正式评测使用相同规则。评测结果反映本题规定的逻辑缓存和服务模型，不代表真实推理引擎的绝对性能。</span><span style="line-height: 17pt;"></span></p>
+<h3><a style="color: unset; text-decoration: unset; border-bottom: unset;" rel="nofollow"></a><span class="None"><span style="font-size: 13.5pt; line-height: 144%; font-family: '微软雅黑',sans-serif;">时延测量与重复运行</span></span><span class="None"><span></span></span></h3>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">评测器使用单调时钟测量路由决策时延。计时起点是评测器开始写入已序列化的<span style="line-height: 17pt;"> route </span>行，终点是评测器收到完整的<span style="line-height: 17pt;"> decision </span>行。</span><span style="line-height: 17pt;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">该时延包含管道传输，以及路由程序解析输入、计算决策和序列化输出的耗时。该时延不包含评测器生成快照、预先序列化输入、事后校验输出或执行模拟的耗时。初始化和加载耗时单独统计。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">评测器先使用独立进程预热，再启动新进程进行正式测量。维度<span style="line-height: 17pt;"> B </span>的每次正式运行均从空缓存开始。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">每个<span style="line-height: 17pt;"> A </span>测试组或<span style="line-height: 17pt;"> B </span>场景都独立运行<span style="line-height: 17pt;"> 3 </span>次。每次运行重新启动路由进程，并使用相同的测试数据和算法<span style="line-height: 17pt;"> seed</span>。任一次运行出现协议错误，该评测单元的最终分数为<span style="line-height: 17pt;"> 0</span>。三次运行均协议有效时，取三次分数的中位数，再参与该维度的宏平均。</span><span style="line-height: 17pt;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">Router P95 </span><span style="line-height: 17pt;">使用<span style="line-height: 17pt;"> nearest-rank </span>方法计算。将<span style="line-height: 17pt;"> N </span>条请求的路由决策时延从小到大排序，取第<span style="line-height: 17pt;"> ceil(0.95N) </span>个值，其中<span style="line-height: 17pt;"> ceil </span>表示向上取整。主办方预先确定各测试组的样本量，正式评测不得使用空测试组。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">快、慢参考路由程序使用相同的测量规则。路由决策时延按<span style="line-height: 17pt;"> t=clip((T_slow</span>−<span style="line-height: 17pt;">T_team)/(T_slow</span>−<span style="line-height: 17pt;">T_fast)) </span>归一化，且<span style="line-height: 17pt;"> T_slow&gt;T_fast</span>。维度<span style="line-height: 17pt;"> B </span>的端到端时延使用<span style="line-height: 17pt;"> E_fast/E_slow</span>，并采用相同的“时延越低、得分越高”方向。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">主办方在比赛开始前公开参考方案和标定方法。硬件确定后，主办方须在接收正式提交前公布并冻结锚点数值。锚点不采用参赛队伍成绩中的最大值或最小值。</span><span style="line-height: 17pt;"></span></p>
+<h3><span class="None"><span style="font-weight: normal;">分组与并列规则</span></span><span></span></h3>
+<table class="TableNormal data-preserve-origin-style" border="1" cellspacing="0" cellpadding="0" style="margin-left: 5.4pt; background: #4F81BD; border-collapse: collapse; border: 1px solid transparent; width: 100%;"><colgroup><col style="width: 33.2130%;"><col style="width: 33.3935%;"><col style="width: 33.3935%;"></colgroup>
+<thead>
+<tr style="page-break-inside: avoid; height: 14.9pt;">
+<td style="border: solid #DCE3E8 1.0pt; background: #EDF3F6; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="color: #314452;">部分</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td style="border: solid #DCE3E8 1.0pt; border-left: none; background: #EDF3F6; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="color: #314452;">评价权重</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td style="border: solid #DCE3E8 1.0pt; border-left: none; background: #EDF3F6; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="color: #314452;">评价内容</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+</thead>
+<tbody>
+<tr style="page-break-inside: avoid; height: 40.9pt;">
+<td style="border: solid #DCE3E8 1.0pt; border-top: none; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="line-height: 13pt;">语义路由维度</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid #DCE3E8 1.0pt; border-right: solid #DCE3E8 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-family: 'Cambria',serif;">40%</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid #DCE3E8 1.0pt; border-right: solid #DCE3E8 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt;">质量与成本的平衡、任务识别、路由稳定性和路由决策时延</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid; height: 40.9pt;">
+<td style="border: solid #DCE3E8 1.0pt; border-top: none; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="line-height: 13pt;">系统动态维度</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid #DCE3E8 1.0pt; border-right: solid #DCE3E8 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-family: 'Cambria',serif;">40%</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid #DCE3E8 1.0pt; border-right: solid #DCE3E8 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt;">缓存复用、资源成本、系统时延、按时完成率，以及实例可用性变化时的调度效果</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid; height: 27.9pt;">
+<td style="border: solid #DCE3E8 1.0pt; border-top: none; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="line-height: 13pt;">方案与工程评审</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid #DCE3E8 1.0pt; border-right: solid #DCE3E8 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-family: 'Cambria',serif;">20%</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid #DCE3E8 1.0pt; border-right: solid #DCE3E8 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt;">可复现性、设计解释、消融实验和工程质量</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">维度<span style="line-height: 17pt;"> A </span>对预定义测试组的最终分数取等权平均。维度<span style="line-height: 17pt;"> B </span>对预定义场景的最终分数取等权平均。每个测试组或场景的权重相同，不按其请求数量加权。</span><span style="line-height: 17pt;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">主办方在比赛开始前公布分组和相对样本配额。隐藏测试样本及数据生成种子不公开。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">成绩计算保留原始精度，显示时四舍五入到小数点后<span style="line-height: 17pt;"> 4 </span>位。如果显示的总分相同，依次比较自动评测合计、<span style="line-height: 17pt;">A </span>质量宏平均和<span style="line-height: 17pt;"> B </span>按时完成率宏平均。如果仍相同，则并列。</span><span style="line-height: 17pt;"></span></p>
+<h2 style="line-height: 125%;"><span class="None" style="line-height: 125%;"><span style="font-size: 17.0pt; line-height: 125%; font-family: '微软雅黑',sans-serif;">比赛数据集与下载方式</span></span><span class="None" style="line-height: 125%;"><span style="line-height: 125%;"></span></span></h2>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">公开的<span style="line-height: 17pt;"> LLMRouterBench </span>和<span style="line-height: 17pt;"> Mooncake </span>数据用于开发、训练和本地验证。主办方使用未发放的私有请求及改造后的请求轨迹计算最终排名。</span><span style="line-height: 17pt;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">正式评测期间，路由程序只能读取当前请求和允许提供的状态。“隐藏测试数据”表示主办方不向参赛者发放完整测试集、未来请求、答案和结果矩阵。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">主办方应避免在维度<span style="line-height: 17pt;"> A </span>中使用可以从公开结果包直接查询答案的测试请求。维度<span style="line-height: 17pt;"> B </span>无需使用<span style="line-height: 17pt;"> LLMRouterBench </span>的质量标签。</span><span style="line-height: 17pt;"></span></p>
+<table class="TableNormal data-preserve-origin-style" border="1" cellspacing="0" cellpadding="0" style="margin-left: 5.4pt; background: #4F81BD; border-collapse: collapse; border: 1px solid transparent; width: 100%;"><colgroup><col style="width: 25.9459%;"><col style="width: 25.5856%;"><col style="width: 23.7838%;"><col style="width: 24.6847%;"></colgroup>
+<thead>
+<tr style="page-break-inside: avoid; height: 14.2pt;">
+<td style="border: solid #DCE3E8 1.0pt; background: #EDF3F6; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt; color: #314452;">数据集</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td style="border: solid #DCE3E8 1.0pt; border-left: none; background: #EDF3F6; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt; color: #314452;">数据内容</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td style="border: solid #DCE3E8 1.0pt; border-left: none; background: #EDF3F6; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt; color: #314452;">本题用途</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td style="border: solid #DCE3E8 1.0pt; border-left: none; background: #EDF3F6; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt; color: #314452;">使用限制</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+</thead>
+<tbody>
+<tr style="page-break-inside: avoid; height: 66.2pt;">
+<td style="border: solid #DCE3E8 1.0pt; border-top: none; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'Cambria Bold',serif;">LLMRouterBench</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid #DCE3E8 1.0pt; border-right: solid #DCE3E8 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt;">多个任务和模型的预计算结果，包括 query、模型输出、质量分数、输入输出 token 数及成本。</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid #DCE3E8 1.0pt; border-right: solid #DCE3E8 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt;">用于维度<span style="line-height: 13pt;"> A </span>的公开训练与验证。主办方为隐藏测试请求离线生成候选模型的质量与成本矩阵。</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid #DCE3E8 1.0pt; border-right: solid #DCE3E8 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt;">主办方不发放正式测试的结果标签。维度<span style="line-height: 13pt;"> B </span>不依赖该数据集的质量标签。模型池、任务指标映射、数据版本和缺失值处理方法在赛前确定并冻结。</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+<tr style="page-break-inside: avoid; height: 92.2pt;">
+<td style="border: solid #DCE3E8 1.0pt; border-top: none; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.0pt; font-family: 'Cambria Bold',serif;">Mooncake FAST'25 Trace Release</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid #DCE3E8 1.0pt; border-right: solid #DCE3E8 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt;">包含<span style="line-height: 13pt;"> Conversation</span>、<span style="line-height: 13pt;">Tool &amp; Agent</span>、<span style="line-height: 13pt;">Synthetic </span>三类请求轨迹。字段包括<span style="line-height: 13pt;"> timestamp</span>、<span style="line-height: 13pt;">input/output length </span>和<span style="line-height: 13pt;"> hash_ids</span>。每个前缀块包含<span style="line-height: 13pt;"> 512 </span>个<span style="line-height: 13pt;"> token</span>。</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid #DCE3E8 1.0pt; border-right: solid #DCE3E8 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt;">为维度<span style="line-height: 13pt;"> B </span>提供请求到达时间、输入输出长度和逻辑前缀复用关系。用于模拟同一模型多个实例的调度，不用于评测回答质量。</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+<td style="border-top: none; border-left: none; border-bottom: solid #DCE3E8 1.0pt; border-right: solid #DCE3E8 1.0pt; background: transparent; padding: 4.0pt 4.0pt 4.0pt 4.0pt;">
+<p style="line-height: 13.0pt; margin: 3.0pt 0cm 3.0pt 0cm;"><span class="None" style="line-height: 13pt;"><span style="font-size: 9.5pt;">不含请求原文<span style="line-height: 13pt;"> prompt </span>或模型质量标签。主办方负责映射和改造数据，并发布可复现的开发集及固定协议。</span></span><span style="line-height: 13pt;"></span></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">开发包应包含确定版本的协议和模拟器、实例与服务参数配置（<span style="line-height: 17pt;">profile</span>）示例、公开训练和调试数据、参考路由程序、协议自检工具、预期指标和评分配置。</span><span style="line-height: 17pt;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">主办方离线准备维度<span style="line-height: 17pt;"> A </span>的完整“请求 × 模型”质量与成本矩阵，以及维度<span style="line-height: 17pt;"> B </span>的请求轨迹和服务参数配置。在发布题目前，主办方应确认矩阵没有缺失项、每个场景都能在有限时间内完成，并且评分公式的归一化区间有效。</span><span style="line-height: 17pt;"></span></p>
+<h3><span class="None"><span style="font-size: 13.5pt; line-height: 144%; font-family: '微软雅黑',sans-serif;">参赛者下载入口</span></span><span></span></h3>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;"><a href="https://github.com/ynulihao/LLMRouterBench" style="color: unset; text-decoration: unset; border-bottom: unset;" rel="nofollow"><span class="Hyperlink1" style="line-height: 17pt;"><span style="line-height: 17pt;">↗</span></span><span class="Hyperlink1" style="line-height: 17pt;"><span style="font-family: 'Cambria',serif;"> LLMRouterBench GitHub </span></span><span class="None" style="line-height: 17pt;"><span style="font-family: 宋体; color: #0000ee;"><span style="line-height: 17pt;">仓库</span></span></span></a><br><a href="https://huggingface.co/datasets/NPULH/LLMRouterBench" style="color: unset; text-decoration: unset; border-bottom: unset;" rel="nofollow"><span class="Hyperlink1" style="line-height: 17pt;"><span style="line-height: 17pt;">↗</span></span><span class="Hyperlink1" style="line-height: 17pt;"><span style="font-family: 'Cambria',serif;"> LLMRouterBench Hugging Face </span></span><span class="None" style="line-height: 17pt;"><span style="font-family: 宋体; color: #0000ee;"><span style="line-height: 17pt;">数据集</span></span></span></a><br><a href="https://github.com/kvcache-ai/Mooncake/tree/main/FAST25-release" style="color: unset; text-decoration: unset; border-bottom: unset;" rel="nofollow"><span class="Hyperlink1" style="line-height: 17pt;"><span style="line-height: 17pt;">↗</span></span><span class="Hyperlink1" style="line-height: 17pt;"><span style="font-family: 'Cambria',serif;"> Mooncake FAST'25 Release</span></span></a></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="font-family: 微软雅黑;">LLMRouterBench </span></span><span class="None" style="line-height: 17pt;"><span style="font-family: 微软雅黑;">的仓库<span style="line-height: 17pt;"> README </span>在“数据下载”部分提供百度网盘、<span style="line-height: 17pt;">Google Drive </span>和<span style="line-height: 17pt;"> Hugging Face </span>入口。预计算结果包的文件名为<span style="line-height: 17pt;"> bench-release.tar.gz</span>。解压后的主要目录为<span style="line-height: 17pt;"> results/bench/</span>。</span><span style="line-height: 17pt;"></span></span></p>
+<p style="margin-bottom: 6.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="font-family: 微软雅黑;">Mooncake </span></span><span class="None" style="line-height: 17pt;"><span style="font-family: 微软雅黑;">请求轨迹位于<span style="line-height: 17pt;"> FAST'25 Release </span>的<span style="line-height: 17pt;"> traces/ </span>目录。文件包括<span style="line-height: 17pt;"> conversation_trace.jsonl</span>、<span style="line-height: 17pt;">toolagent_trace.jsonl </span>和<span style="line-height: 17pt;"> synthetic_trace.jsonl</span>。</span><span style="line-height: 17pt;"></span></span></p>
+<h2><span class="None"><span style="font-weight: normal;">附录</span></span><span class="None"><span style="font-family: 'Calibri',sans-serif;"> </span></span><span class="None"><span style="font-weight: normal;">评测接口与模拟规则</span></span><span></span></h2>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">本附录规定协议版本<span style="line-height: 17pt;"> 1.0 </span>的接口和模拟规则。示例中的数值仅用于接口联调，不作为正式硬件配额或超时限制。主办方将正式参数写入公开配置，并在比赛开始前冻结。</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">主办方提供评测器、模拟器和自检工具。参赛者负责实现<span style="line-height: 17pt;"> init/ready </span>初始化交互和<span style="line-height: 17pt;"> route/decision </span>请求响应。</span><span style="line-height: 17pt;"></span></p>
+<h3><span class="None"><span style="font-weight: normal;">初始化与实例目录</span></span><span></span></h3>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt; page-break-after: avoid;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">init </span></span><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">消息包含以下必填字段：</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">•<span style="line-height: 17pt;"> type</span>：固定为<span style="line-height: 17pt;"> "init"</span>。<span style="line-height: 17pt;">protocol_version</span>：固定为<span style="line-height: 17pt;"> "1.0"</span>。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">•<span style="line-height: 17pt;"> run_id</span>：非空字符串。<span style="line-height: 17pt;">track</span>：取值为<span style="line-height: 17pt;"> A </span>或<span style="line-height: 17pt;"> B</span>。<span style="line-height: 17pt;">seed</span>：非负整数。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">•<span style="line-height: 17pt;"> instances</span>：非空数组。<span style="line-height: 17pt;">profiles </span>和<span style="line-height: 17pt;"> limits</span>：对象。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">路由程序完成初始化后发送<span style="line-height: 17pt;"> ready </span>消息。消息包含<span style="line-height: 17pt;"> type="ready"</span>，并原样返回<span style="line-height: 17pt;"> protocol_version </span>和<span style="line-height: 17pt;"> run_id</span>。评测器收到<span style="line-height: 17pt;"> ready </span>后，才发送<span style="line-height: 17pt;"> route</span>。程序从启动到发送<span style="line-height: 17pt;"> ready </span>的耗时不得超过启动超时限制。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">init.seed </span><span style="line-height: 17pt;">只控制参赛算法使用的随机性。主办方独立保存生成隐藏请求、故障和场景的种子，不通过协议提供这些种子。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">instances </span></span><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">数组中的每个条目都须包含<span style="line-height: 17pt;"> instance_id</span>、<span style="line-height: 17pt;">model_id</span>、<span style="line-height: 17pt;">model_version </span>和<span style="line-height: 17pt;"> profile_id</span>。这四个字段均为非空字符串。各实例的<span style="line-height: 17pt;"> instance_id </span>不得重复。<span style="line-height: 17pt;">profile_id </span>须指向<span style="line-height: 17pt;"> profiles </span>中存在的配置。</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">维度<span style="line-height: 17pt;"> B </span>的实例条目还须包含<span style="line-height: 17pt;"> cache_capacity_tokens</span>。该值为正整数，且为<span style="line-height: 17pt;"> 512 </span>的倍数。同一次运行中，候选实例集合保持不变。维度<span style="line-height: 17pt;"> B </span>的所有实例使用同一模型和版本，实例状态快照给出当前可用性。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">维度<span style="line-height: 17pt;"> A </span>的<span style="line-height: 17pt;"> profile </span>须包含<span style="line-height: 17pt;"> input_cost_per_token </span>和<span style="line-height: 17pt;"> output_cost_per_token</span>。两个值均为有限非负数。模型标识须与公开训练数据中的标识对应。</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">评测器使用已冻结的完整输入输出<span style="line-height: 17pt;"> token </span>记录和上述单价计算模型成本，并统一使用模拟成本单位。<span style="line-height: 17pt;">init </span>不提供私有质量结果、模型输出文本、参考答案或逐请求资源结果。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt; page-break-after: avoid;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">维度<span style="line-height: 17pt;"> B </span>的<span style="line-height: 17pt;"> profile </span>须包含以下参数：</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">•<span style="line-height: 17pt;"> prefill_ms_per_token </span>和<span style="line-height: 17pt;"> decode_ms_per_token</span>：有限正数。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">•<span style="line-height: 17pt;"> fixed_ms</span>、<span style="line-height: 17pt;">prefill_cost_per_token</span>、<span style="line-height: 17pt;">decode_cost_per_token </span>和<span style="line-height: 17pt;"> kv_cost_per_GB_s</span>：有限非负数。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">•<span style="line-height: 17pt;"> kv_bytes_per_token</span>：正整数。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">这些参数公开用于模拟。评测器不调用真实模型来测量当次服务时间。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">服务时间<span style="line-height: 17pt;"> = fixed_ms + </span>重算输入<span style="line-height: 17pt;"> token</span>×<span style="line-height: 17pt;">prefill_ms_per_token + </span>输出<span style="line-height: 17pt;"> token</span>×<span style="line-height: 17pt;">decode_ms_per_token</span>。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">limits </span></span><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">须包含以下字段，且所有值均为正整数：<span style="line-height: 17pt;">startup_timeout_ms</span>、<span style="line-height: 17pt;">request_timeout_ms</span>、<span style="line-height: 17pt;">exit_timeout_ms</span>、<span style="line-height: 17pt;">max_input_line_bytes</span>、<span style="line-height: 17pt;">max_output_line_bytes</span>、<span style="line-height: 17pt;">memory_mb</span>、<span style="line-height: 17pt;">cpu_threads</span>。</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">评测器在<span style="line-height: 17pt;"> cwd </span>指定的目录中，使用<span style="line-height: 17pt;"> argv </span>直接启动路由程序。程序不能访问外网。官方进程管理器执行内存和线程数限制。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">收到输入结束信号（<span style="line-height: 17pt;">EOF</span>）后，程序须在<span style="line-height: 17pt;"> exit_timeout_ms </span>内退出，退出码为<span style="line-height: 17pt;"> 0</span>。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">程序应忽略不认识的输入扩展字段。输出只能包含协议定义的字段，不得包含<span style="line-height: 17pt;"> NaN</span>、<span style="line-height: 17pt;">Infinity</span>、重复的<span style="line-height: 17pt;"> JSON </span>键或额外日志行。</span><span style="line-height: 17pt;"></span></p>
+<h3><span class="None"><span style="font-weight: normal;">初始化示例</span></span><span></span></h3>
+<p style="margin-bottom: 4.0pt; line-height: 11.5pt;"><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">{"type":"init","protocol_version":"1.0",</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp;</span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"run_id":"demo-a","track":"A","seed":7,</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp;</span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"instances":[{"instance_id":"instance-a0",</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp;&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"model_id":"model-a","model_version":"v1",</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp;&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"profile_id":"pa"}],</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp;</span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"profiles":{"pa":{"input_cost_per_token":1.0,</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp;&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"output_cost_per_token":2.0}},</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp;</span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"limits":{"startup_timeout_ms":30000,</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp;&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"request_timeout_ms":5000,"exit_timeout_ms":5000,</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp;&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"max_input_line_bytes":1048576,</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp;&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"max_output_line_bytes":4096,</span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;"><br><span style="line-height: 11.5pt;">&nbsp;&nbsp; </span></span></span><span class="None" style="line-height: 11.5pt;"><span style="font-size: 8.5pt; font-family: 'Menlo',serif;">"memory_mb":4096,"cpu_threads":2}}</span></span><span style="line-height: 11.5pt;"></span></p>
+<h3><span class="None"><span style="font-weight: normal;">实例状态字段</span></span><span></span></h3>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">runtime_context.instance_snapshot.&lt;instance_id&gt; </span></span><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">中的以下状态字段全部必填。</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">协议版本<span style="line-height: 17pt;"> 1.0 </span>为每个实例设置一个服务槽，即同一时刻只执行一个请求。其余请求进入先到先服务（<span style="line-height: 17pt;">FIFO</span>）队列。不同实例可以并行执行请求。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">模拟器不模拟批处理、单实例多槽并发、<span style="line-height: 17pt;">KV </span>跨实例传输或抢占迁移。每个新请求到达时，路由程序只选择一次目标实例。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">available</span></span><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">：布尔值，表示实例当前是否接收新请求。实例不可用时，不接收新请求，并暂停已有任务的服务计时。模拟器保留该实例的队列和缓存，待实例恢复后继续执行。</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">主办方保证每个请求到达时至少有一个实例可用，并保证故障实例在有限时间内恢复。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">queue_length</span></span><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">：非负整数，表示正在等待执行的请求数，不包含当前运行的任务。</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">running_remaining_ms</span></span><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">：有限非负数，表示当前任务还需要的有效服务时间。实例空闲时，该值为<span style="line-height: 17pt;"> 0</span>。该值不包含未来故障造成的暂停时间。</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">queued_work_ms</span></span><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">：有限非负数。模拟器假设等待队列中的请求完全未命中缓存，并据此估算各请求的服务时间，再将这些时间相加。该值不包含当前运行任务的时间。它表示等待任务的服务工作量上限，不是考虑未来缓存变化后的精确等待时间。</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">cache_used_tokens</span></span><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">：非负整数，且为<span style="line-height: 17pt;"> 512 </span>的倍数。该值表示实例当前缓存的逻辑前缀<span style="line-height: 17pt;"> token </span>数，不得超过缓存容量。</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">cached_prefix_tokens</span></span><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">：非负整数，且为<span style="line-height: 17pt;"> 512 </span>的倍数。该值表示当前请求在当前实例上可以复用的最长连续前缀长度，单位为<span style="line-height: 17pt;"> token</span>，且不大于<span style="line-height: 17pt;"> eligible_prefix_tokens</span>。该值只反映快照时刻的状态。请求排队期间缓存可能变化，因此该值不保证等于实际执行时的命中量。</span></span><span style="line-height: 17pt;"></span></p>
+<h3><span class="None"><span style="font-weight: normal;">模拟状态更新与缓存规则</span></span><span></span></h3>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt; page-break-after: avoid;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">1. </span></span><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">同一时刻的事件处理顺序</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">每个场景从空队列和空缓存开始。模拟器按模拟时间推进状态。同一时刻，模拟器先处理任务完成及缓存写入，再处理实例可用性变化，最后按<span style="line-height: 17pt;"> seq </span>处理新到达的请求。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">多个任务在同一时刻完成时，模拟器先按<span style="line-height: 17pt;"> instance_id </span>排序，再按原请求的<span style="line-height: 17pt;"> seq </span>排序。完成事件和可用性事件处理完毕后，模拟器按<span style="line-height: 17pt;"> FIFO </span>启动可以执行的等待任务，再生成路由输入快照。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">路由程序选定实例后，模拟器立即将请求加入该实例的队列。如果实例空闲且可用，模拟器立即启动请求，然后处理同一时刻的下一条新请求。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">如果新启动的任务在当前时刻即可完成，模拟器立即处理任务完成、缓存更新和后续<span style="line-height: 17pt;"> FIFO </span>任务。模拟器重复此过程，直到当前时刻没有待处理的完成事件，再生成下一条请求的快照。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt; page-break-after: avoid;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">2. </span></span><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">实际耗时与模拟时间</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">路由程序的实际耗时只计入<span style="line-height: 17pt;"> Router P95</span>，不推进模拟器的虚拟时钟。维度<span style="line-height: 17pt;"> B </span>的<span style="line-height: 17pt;"> e2e_ms </span>等于模拟完成时刻减<span style="line-height: 17pt;"> arrival_ms</span>。该值包含排队、故障暂停和服务时间，不包含路由程序的实际耗时。按此规则，相同路由决策序列可产生相同的系统模拟指标。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt; page-break-after: avoid;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">3. </span></span><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">前缀块与实际命中量</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">模拟器保留每条请求的有序前缀块，每个完整块包含<span style="line-height: 17pt;"> 512 </span>个<span style="line-height: 17pt;"> token</span>。<span style="line-height: 17pt;">eligible_prefix_tokens </span>等于可复用完整块覆盖的<span style="line-height: 17pt;"> token </span>总数。输入末尾不足一个块的<span style="line-height: 17pt;"> token </span>始终重新计算。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">块的<span style="line-height: 17pt;"> hash </span>映射须包含前序块链的信息，防止模拟器将不同上下文中的同名块误判为可复用块。请求开始执行时，模拟器查找最长的连续命中前缀。<span style="line-height: 17pt;">cache_hit_i </span>表示该前缀的<span style="line-height: 17pt;"> token </span>数，重算量按<span style="line-height: 17pt;"> recompute_i = input_tokens_i </span>−<span style="line-height: 17pt;"> cache_hit_i </span>计算。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt; page-break-after: avoid;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">4. </span></span><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">缓存写入与淘汰</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">请求开始执行时，模拟器更新命中块的最近访问时间。请求完成时，模拟器按前缀次序写入或刷新该请求的全部可复用输入块。模型输出<span style="line-height: 17pt;"> token </span>不写入此前缀缓存。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">相同块只占用一份缓存容量。缓存容量不足时，模拟器按最近最少使用（<span style="line-height: 17pt;">LRU</span>）规则淘汰块。最近访问时间相同时，按块标识的字典序确定顺序。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">同一场景中，各实例的缓存相互独立。实例因故障暂停时，模拟器保留其缓存。请求排队期间缓存可以变化，因此快照中的可复用量可能不同于实际命中量。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt; page-break-after: avoid;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">5. </span></span><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">计算成本与缓存驻留成本</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">计算成本<span style="line-height: 17pt;"> = </span>重算输入<span style="line-height: 17pt;"> token</span>×<span style="line-height: 17pt;">prefill_cost_per_token + </span>输出<span style="line-height: 17pt;"> token</span>×<span style="line-height: 17pt;">decode_cost_per_token</span>。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">缓存计费从首条请求到达时开始，到最后完成的请求结束时停止。对每个实例，模拟器先计算当前缓存<span style="line-height: 17pt;"> token </span>数×<span style="line-height: 17pt;">kv_bytes_per_token</span>，得到缓存字节数。再对缓存字节数按时间积分，并将结果换算为十进制<span style="line-height: 17pt;"> GB</span>·<span style="line-height: 17pt;">s</span>。该值乘以<span style="line-height: 17pt;"> kv_cost_per_GB_s</span>，即为该实例的缓存驻留成本。最后，将所有实例的缓存驻留成本相加。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">运行任务产生的临时<span style="line-height: 17pt;"> KV </span>不计入上述驻留缓存成本。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt; page-break-after: avoid;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">6. </span></span><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">请求完成与数据可见范围</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">请求合法分派后，模拟器不重试、不丢弃，也不改派。完成时限只影响按时完成率。最后一条请求到达后，模拟器继续运行，直到所有请求完成、队列排空。主办方须事先验证开发场景和隐藏测试场景都能在有限时间内完成。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">模拟器不向路由算法回传当前请求的执行结果。评测器只在下一条请求到达时提供当时允许读取的状态，不提供未来事件、结果标签或尚未到达的请求。</span><span style="line-height: 17pt;"></span></p>
+<h3><span class="None"><span style="font-weight: normal;">评分配置与验收材料</span></span><span></span></h3>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">主办方须在正式发布题目前公布<span style="line-height: 17pt;"> score_config</span>。配置包含协议及模拟器版本、维度<span style="line-height: 17pt;"> A </span>的质量映射方法和门槛、各组权重和相对样本配额、归一化上下限、参考算法、测量与重复运行规则，以及工程评审细则。</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">测试数据内容和数据生成种子可以保密，但配置含义及计算方法须公开。如果硬件尚未确定，主办方可以先公布时延锚点的计算方法，并在接收正式提交前完成标定、公布数值。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">主办方使用固定路由、最短工作量和缓存优先三类参考方案检查评分配置。检查内容包括：质量门槛是否可达到、归一化分母是否都大于<span style="line-height: 17pt;"> 0</span>，以及多数有效方案是否因截断而得到相同分数。主办方还应检查权重变化对结果的影响。</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">在维度<span style="line-height: 17pt;"> A </span>的单次组分数中，质量得分占<span style="line-height: 17pt;"> 55%</span>。满足质量门槛后，质量得分的下降可以由成本得分的提高补偿。如果比赛要求严格按质量优先排序，主办方须在比赛前调整排序规则。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span class="None" style="line-height: 17pt;"><span style="line-height: 17pt;">协议自检工具至少应检查初始化、<span style="line-height: 17pt;">EOF</span>、合法路由、<span style="line-height: 17pt;">null </span>字段、未知实例、不可用目标，以及乱序、重复输出和响应超时。</span></span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">模拟器自检至少应检查同一时刻到达、部分前缀命中、缓存淘汰、故障暂停与恢复，以及超过完成时限后仍继续执行的请求。自检还应覆盖评分边界和重复运行的一致性。</span><span style="line-height: 17pt;"></span></p>
+<p style="margin-bottom: 4.0pt; line-height: 17.0pt;"><span style="line-height: 17pt;">本次比赛时长为<span style="line-height: 17pt;"> 24 </span>小时。主办方应在比赛开始前提供可运行的开发包。参赛者无需补写协议或实现官方模拟器。</span><span style="line-height: 17pt;"></span></p>

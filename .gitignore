@@ -1,0 +1,28 @@
+# Research scratch files, dependency junctions and previous drafts
+**/_work/
+**/node_modules/
+*.inspect.ndjson
+inspect.ndjson
+
+# Generated archives duplicate the versioned source documents
+/*.zip
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+!.env.sample
+.aws/
+.codex/
+.agents/
+
+# Editor, OS and Python caches
+.vscode/
+.idea/
+__pycache__/
+*.py[cod]
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.tmp
+*.log
