@@ -24,5 +24,7 @@ __pycache__/
 .DS_Store
 Thumbs.db
 Desktop.ini
+# Office working-session lock files
+~$*
 *.tmp
 *.log
