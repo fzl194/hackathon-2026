@@ -47,6 +47,8 @@ IVF是Inverted File的缩写。在向量搜索里，可以先理解成“每个�
 
 ## 延伸阅读
 
+[IVF查询手推](IVF查询手推.md)：同一组8个点，演示nprobe=1如何漏掉真近邻，增加预算如何补回。
+
 [量化与重排序](量化与重排序.md) · [过滤检索](过滤检索.md) · [召回率与性能评测](../基础/召回率与性能评测.md)
 
 来源：[Faiss索引说明](https://github.com/facebookresearch/faiss/wiki/Faiss-indexes)、[pgvector IVFFlat](https://github.com/pgvector/pgvector#ivfflat)。

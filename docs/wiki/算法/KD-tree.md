@@ -51,6 +51,8 @@ KD-tree是一种组织多维点的树结构。它递归划分空间，查询时�
 
 ## 延伸阅读
 
+[KD-tree查询手推](KD-tree查询手推.md)：用8个点逐步维护Top-2，计算包围盒下界并剪枝。
+
 [IVF](IVF.md) · [HNSW](HNSW.md) · [距离与向量类型](../基础/距离与向量类型.md)
 
 来源：[SciPy KDTree文档](https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.KDTree.html)。
