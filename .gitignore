@@ -1,11 +1,17 @@
-# Research scratch files, dependency junctions and previous drafts
-**/_work/
-**/node_modules/
-*.inspect.ndjson
-inspect.ndjson
-
-# Generated archives duplicate the versioned source documents
-/*.zip
+# Benchmark data, indexes, experiments and build outputs
+/data/
+/datasets/
+/indexes/
+/results/
+/build/
+/target/
+/_work/
+/tmp/
+*.o
+*.so
+*.dll
+*.exe
+*.zip
 
 # Local configuration and credentials
 .env
@@ -24,7 +30,5 @@ __pycache__/
 .DS_Store
 Thumbs.db
 Desktop.ini
-# Office working-session lock files
-~$*
 *.tmp
 *.log

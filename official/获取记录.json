@@ -1,0 +1,18 @@
+{
+  "topic_number": 14,
+  "selected": true,
+  "selected_on": "2026-10-21",
+  "title": "【2026Hackathon决赛】14：基于磁盘的 PostgreSQL 向量索引",
+  "content_id": "1326647897176236032",
+  "source_url": "https://www.chaspark.com/#/races/competitions/1326647897176236032",
+  "api_url": "https://www.chaspark.com/chasiwu/v1/content/races/question/detail/1326647897176236032",
+  "fetched_at": "2026-10-21T11:13:01+08:00",
+  "official_update_timestamp": "1791431294",
+  "official_updated_at": "2026-10-08T11:48:14+08:00",
+  "html_sha256": "5331a1f49709338ac09f45f59a5fe62669f25df998f432088a3d16c5b8aca475",
+  "compared_with_archive_date": "2026-10-11",
+  "content_changed_since_archive": false,
+  "attachments": [],
+  "image_count": 0,
+  "verification": "官方题面获取成功；尚未获取组委会评测调度脚本、正式VM配置或完整开发包。"
+}
