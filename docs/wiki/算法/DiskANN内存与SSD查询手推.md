@@ -108,4 +108,6 @@ cpp_main也允许SSD坐标使用PQ。此时读回仍是有损表示；若要借�
 
 这些机制还没有自动解决PG的[MVCC](../数据库/MVCC.md)、[事务](../数据库/事务.md)和[WAL](../数据库/WAL.md)。本项目尚未实现扩展或运行DiskANN基准，下一步可做小规模路径与资源实验，不能把本页算例视为已完成验证。
 
+接着读：[向量索引的PG页面与缓存](../数据库/向量索引的PG页面与缓存.md) → [向量插入的事务与WAL手推](../数据库/向量插入的事务与WAL手推.md) → [向量查询的索引与MVCC手推](../数据库/向量查询的索引与MVCC手推.md)。
+
 来源（核查日期2026-10-21）：[C++ SSD使用与参数](https://github.com/microsoft/DiskANN/blob/cpp_main/workflows/SSD_index.md)、[PQFlashIndex查询与重排实现](https://github.com/microsoft/DiskANN/blob/cpp_main/src/pq_flash_index.cpp)、[节点与扇区常量](https://github.com/microsoft/DiskANN/blob/cpp_main/include/defaults.h)、[2019论文§3](https://papers.nips.cc/paper_files/paper/2019/file/09853c7fb1d3f8ee67a61b6bf4a7f8e6-Paper.pdf)、[当前项目版本说明](https://github.com/microsoft/DiskANN)。

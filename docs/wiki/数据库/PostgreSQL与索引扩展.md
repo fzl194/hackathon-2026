@@ -62,6 +62,7 @@ SQL 查询
 
 ## 相关阅读与主要来源
 
+- 完整流程：[向量索引的PG页面与缓存](向量索引的PG页面与缓存.md) → [向量插入的事务与WAL手推](向量插入的事务与WAL手推.md) → [向量查询的索引与MVCC手推](向量查询的索引与MVCC手推.md)。
 - 下一步：[事务](事务.md)、[MVCC](MVCC.md)、[WAL](WAL.md)。
 - [PostgreSQL 18：索引介绍](https://www.postgresql.org/docs/18/indexes-intro.html)。
 - [PostgreSQL 18：索引访问方法接口](https://www.postgresql.org/docs/18/indexam.html)。
