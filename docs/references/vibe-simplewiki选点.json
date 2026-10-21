@@ -1,0 +1,51 @@
+{
+  "accessed_on": "2026-10-21",
+  "source_commit": "9841a87385af0a2ce43efd61fca70dd7c4f40b4b",
+  "source_url": "https://raw.githubusercontent.com/vector-index-bench/vector-index-bench.github.io/9841a87385af0a2ce43efd61fca70dd7c4f40b4b/results/summary.parquet",
+  "source_sha256": "af92888b6873b984b777459c3b571974afe64e3add6fc1c2f473e3bd109b3b7e",
+  "source_commit_time_utc": "2026-07-31T14:07:25Z",
+  "selection": "For each of four named implementations, highest stored qps among k=100, dataset=simplewiki-openai-3072-normalized, recall>=0.95. No interpolation. Not a contest/PG benchmark or global ranking.",
+  "query_sql": "SELECT * FROM read_parquet('_work/vibe-summary-pinned.parquet') WHERE dataset='simplewiki-openai-3072-normalized' AND k=100 AND recall>=0.95 AND algorithm IN ('hnswlib','ivf(faiss)','ivfpqfs(faiss)','vamana(diskann)') QUALIFY row_number() OVER (PARTITION BY algorithm ORDER BY qps DESC)=1 ORDER BY algorithm",
+  "rows": [
+    {
+      "k": 100,
+      "dataset": "simplewiki-openai-3072-normalized",
+      "algorithm": "hnswlib",
+      "params": "HNSWLib(M=8, efConstruction=500, efQuery=200)|200",
+      "qps": 481.5484595227827,
+      "recall": 0.9624300000000001,
+      "build_time": 1264.4467628002167,
+      "index_size": 3202460.0
+    },
+    {
+      "k": 100,
+      "dataset": "simplewiki-openai-3072-normalized",
+      "algorithm": "ivf(faiss)",
+      "params": "FaissIVF(n_list=2048, n_probe=64)|64",
+      "qps": 82.65797092649079,
+      "recall": 0.95827,
+      "build_time": 299.9812161922455,
+      "index_size": 4351376.0
+    },
+    {
+      "k": 100,
+      "dataset": "simplewiki-openai-3072-normalized",
+      "algorithm": "ivfpqfs(faiss)",
+      "params": "FaissIVFPQfs(n_list=512, dim_reduction=0, n_probe=32, k_factor=2)|32_2",
+      "qps": 411.4229562887974,
+      "recall": 0.96447,
+      "build_time": 88.20144033432007,
+      "index_size": 3406536.0
+    },
+    {
+      "k": 100,
+      "dataset": "simplewiki-openai-3072-normalized",
+      "algorithm": "vamana(diskann)",
+      "params": "Vamana(complexity=128, graph_degree=64, alpha=1.2, search_complexity=100)|100",
+      "qps": 269.8613280308344,
+      "recall": 0.9923900000000001,
+      "build_time": 2585.5409409999847,
+      "index_size": 3238528.0
+    }
+  ]
+}
