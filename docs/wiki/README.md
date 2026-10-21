@@ -21,6 +21,8 @@
 
 理解查询后继续读：[HNSW插入与选边手推](算法/HNSW插入与选边手推.md) → [HNSW参数与构建代价](算法/HNSW参数与构建代价.md)。观察新节点怎样选邻居、为什么近点可能重复覆盖，以及M和efConstruction怎样分工。
 
+接着对比：[Vamana构图与RobustPrune手推](算法/Vamana构图与RobustPrune手推.md) → [DiskANN内存与SSD查询手推](算法/DiskANN内存与SSD查询手推.md)。先看α如何改变选边，再看内存短码、缓存、SSD记录和读取宽度怎样配合。
+
 ## 按问题查阅
 
 |分类|知识页|解决的疑问|

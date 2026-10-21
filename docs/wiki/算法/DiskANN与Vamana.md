@@ -48,6 +48,12 @@ DiskANN的经典磁盘方案把图搜索、压缩表示、缓存和SSD读取一�
 
 ## 延伸阅读
 
+[Vamana构图与RobustPrune手推](Vamana构图与RobustPrune手推.md)：对比α=1与1.5的选边，区分HNSW与Vamana的构建和搜索。
+
+[DiskANN内存与SSD查询手推](DiskANN内存与SSD查询手推.md)：沿小图追踪短码估距、缓存、并行读盘与准确评分。
+
 [PostgreSQL与索引扩展](../数据库/PostgreSQL与索引扩展.md) · [MVCC](../数据库/MVCC.md) · [WAL](../数据库/WAL.md) · [公开基准现状](../../公开基准现状.md)
+
+版本提醒：2026-10-21核对时，官方main已是新的Rust架构，旧C++在cpp_main分支且标为非活跃维护。本Wiki手推明确区分2019论文、经典C++路径和当前项目，不把教学原理当作最新实现的逐行说明。
 
 来源：[DiskANN原论文](https://papers.nips.cc/paper_files/paper/2019/hash/09853c7fb1d3f8ee67a61b6bf4a7f8e6-Abstract.html)、[实现库](https://github.com/microsoft/DiskANN)、[VIBE内存版适配](https://github.com/vector-index-bench/vibe/blob/main/vibe/algorithms/diskann/module.py)、[pgvectorscale](https://github.com/timescale/pgvectorscale)。
