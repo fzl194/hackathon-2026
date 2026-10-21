@@ -44,6 +44,10 @@ pgvector已有HNSW，可作为学习与验证参照。其索引能持久化到�
 
 ## 延伸阅读
 
+[HNSW查询手推](HNSW查询手推.md)：单路径贪心卡在B，两个候选怎样通过另一支路找到D。
+
+[HNSW多层导航](HNSW多层导航.md)：在相同例子上增加一层，观察更好的入口与底层候选搜索如何配合。
+
 [磁盘与内存](../数据库/磁盘与内存.md) · [DiskANN与Vamana](DiskANN与Vamana.md) · [动态更新](动态更新.md)
 
 来源：[HNSW作者论文](https://arxiv.org/abs/1603.09320)、[pgvector HNSW](https://github.com/pgvector/pgvector#hnsw)。
